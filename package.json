@@ -1,0 +1,19 @@
+{
+  "name": "cortex",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "dev:backend": "apps/backend/venv/Scripts/python.exe -m uvicorn app.main:app --app-dir apps/backend --host 127.0.0.1 --port 8000",
+    "dev:web": "npm run dev --prefix apps/web",
+    "dev:electron": "npm run build --prefix apps/desktop && npx --prefix apps/desktop electron apps/desktop",
+    "dev": "concurrently -n backend,web -c blue,green \"npm:dev:backend\" \"npm:dev:web\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "private": true,
+  "devDependencies": {
+    "concurrently": "^10.0.5"
+  }
+}

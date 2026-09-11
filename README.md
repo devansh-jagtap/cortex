@@ -10,8 +10,11 @@ by meaning, not filename — "dogs at the beach" instead of `IMG_4821.jpg`.
 - **Incremental.** Re-scanning only processes new or changed files.
 
 This repository is being built incrementally, one verified milestone at a time.
-See [`docs/architecture.md`](docs/architecture.md) for the system design and
-[`docs/development.md`](docs/development.md) for how to run it locally.
+
+- [`docs/architecture.md`](docs/architecture.md) — the system design, with the
+  reasoning behind every major decision
+- [`docs/roadmap.md`](docs/roadmap.md) — the build order, milestone by milestone
+- [`docs/development.md`](docs/development.md) — how to run and test it locally
 
 ## Current status
 
@@ -29,7 +32,7 @@ Electron, Next.js, and FastAPI are wired together end to end:
 
 Not yet implemented: AI embeddings, vector search, SQLite metadata storage,
 EXIF extraction, natural-language search, the image grid/results UI, and the
-map view. See `docs/architecture.md` for the planned roadmap.
+map view. See `docs/roadmap.md` for what comes next and in what order.
 
 ## Stack
 

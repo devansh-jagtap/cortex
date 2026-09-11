@@ -12,12 +12,14 @@ apps/desktop/node_modules/
 apps/desktop/dist/
 
 # Storage (local indexes/DB — never committed)
-storage/database/*.db
-storage/vectors/*.index
-storage/vectors/*.faiss
+storage/database/*
+storage/vectors/*
+storage/thumbnails/*
+!storage/**/.gitkeep
 
 # Models (large local model weights — never committed)
 models/*
+!models/.gitkeep
 
 # OS
 .DS_Store

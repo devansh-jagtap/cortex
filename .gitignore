@@ -1,0 +1,32 @@
+# Python
+apps/backend/venv/
+apps/backend/__pycache__/
+apps/backend/**/__pycache__/
+*.pyc
+
+# Node
+node_modules/
+apps/web/node_modules/
+apps/web/.next/
+apps/desktop/node_modules/
+apps/desktop/dist/
+apps/desktop/electron/dist/
+
+# Storage (local indexes/DB — never committed)
+storage/database/*.db
+storage/vectors/*.index
+storage/vectors/*.faiss
+
+# Models (large local model weights — never committed)
+models/*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+
+# Logs
+*.log

@@ -96,13 +96,13 @@ export default function Home() {
                 <dd className="text-2xl font-semibold">{result.total_files}</dd>
               </div>
               <div>
-                <dt className="text-xs text-neutral-500">Images</dt>
+                <dt className="text-xs text-neutral-500">Images found</dt>
                 <dd className="text-2xl font-semibold text-emerald-400">
                   {result.supported_images}
                 </dd>
               </div>
               <div>
-                <dt className="text-xs text-neutral-500">Unsupported</dt>
+                <dt className="text-xs text-neutral-500">Other files</dt>
                 <dd className="text-2xl font-semibold text-neutral-500">
                   {result.unsupported_files}
                 </dd>

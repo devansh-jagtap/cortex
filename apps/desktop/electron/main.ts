@@ -6,6 +6,16 @@ import path from "node:path";
 const DEV_WEB_URL = process.env.CORTEX_WEB_URL ?? "http://localhost:3000";
 const isDev = !app.isPackaged;
 
+if (isDev) {
+  app.setPath("userData", path.resolve(__dirname, "../../../storage/electron-profile"));
+  app.commandLine.appendSwitch("disable-gpu");
+  app.commandLine.appendSwitch("disable-gpu-compositing");
+  app.commandLine.appendSwitch("disable-gpu-sandbox");
+  app.commandLine.appendSwitch("in-process-gpu");
+  app.commandLine.appendSwitch("disable-software-rasterizer");
+  app.disableHardwareAcceleration();
+}
+
 function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1280,
@@ -16,6 +26,7 @@ function createMainWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      spellcheck: false,
     },
   });
 

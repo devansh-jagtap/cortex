@@ -16,6 +16,7 @@ storage/database/*
 storage/vectors/*
 storage/thumbnails/*
 !storage/**/.gitkeep
+storage/
 
 # Models (large local model weights — never committed)
 models/*

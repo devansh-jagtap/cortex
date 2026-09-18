@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 
-from app.scanner import scan_folder
+from app.indexer import index_folder
 
 app = FastAPI(title="Cortex Backend", version="0.1.0")
 
@@ -49,5 +49,5 @@ def health() -> dict:
 @app.post("/scan")
 def scan(request: ScanRequest) -> dict:
     normalized_path = os.path.abspath(os.path.expanduser(request.path))
-    result = scan_folder(normalized_path)
+    result = index_folder(normalized_path)
     return result.to_dict()

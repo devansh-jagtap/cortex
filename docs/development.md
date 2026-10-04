@@ -67,32 +67,65 @@ npm run dev:web       # Next.js dev server only, from repo root
 
 ```bash
 curl http://127.0.0.1:8000/health
-curl -X POST http://127.0.0.1:8000/scan \
-  -H "Content-Type: application/json" \
-  -d "{\"path\": \"C:/Users/you/Pictures\"}"
+
+# Fast read-only preview: counts files, writes nothing
+curl -X POST http://127.0.0.1:8000/scan -H "Content-Type: application/json"   -d "{\"path\": \"C:/Users/you/Pictures\"}"
+
+# Index a folder in the background, then poll progress
+curl -X POST http://127.0.0.1:8000/index/start -H "Content-Type: application/json"   -d "{\"path\": \"C:/Users/you/Pictures\"}"
+curl http://127.0.0.1:8000/index/status
+curl -X POST http://127.0.0.1:8000/index/cancel
+
+# What's in the library
+curl http://127.0.0.1:8000/library
+curl "http://127.0.0.1:8000/images?limit=20&offset=0"
+curl http://127.0.0.1:8000/images/1/metadata
+curl -o thumb.jpg http://127.0.0.1:8000/images/1/thumbnail
 ```
+
+Only one indexing job runs at a time (a second `/index/start` returns 409).
+Re-indexing the same folder is incremental: unchanged files are skipped
+without being read, so it is close to instant.
+
+## Running the tests
+
+```bash
+cd apps/backend
+./venv/Scripts/python.exe -m pip install -r requirements-dev.txt
+./venv/Scripts/python.exe -m pytest -q
+```
+
+Tests never touch the real `storage/` folder: `tests/conftest.py` points
+`CORTEX_STORAGE_DIR` at a fresh temporary directory for every test, and the
+test images are generated on the fly (`tests/images.py`), including real
+EXIF dates and GPS tags.
 
 ## Storage locations
 
-Nothing is written outside the repo yet — Milestone 1 only scans and reports
-counts. Once indexing lands:
+Cortex never writes to your photo folders. Everything it creates lives
+under `storage/` in the repo (override with the `CORTEX_STORAGE_DIR`
+environment variable):
 
-- `storage/database/` — the SQLite metadata database
-- `storage/vectors/` — the FAISS index file(s)
-- `models/` — local model weights (OpenCLIP), downloaded once and cached
+- `storage/database/cortex.db` — the SQLite index (source of truth). Uses
+  WAL mode, so you may also see `cortex.db-wal` / `cortex.db-shm` next to it.
+- `storage/thumbnails/<aa>/<hash>.jpg` — 320px previews, named by the
+  BLAKE2b hash of the original's content, so identical photos share one
+  thumbnail.
+- `storage/vectors/` — the FAISS index file(s) (from the search milestone).
+- `models/` — local model weights (OpenCLIP), downloaded once and cached.
 
-None of these are committed to git (see `.gitignore`).
+None of these are committed to git (see `.gitignore`). Deleting `storage/`
+is safe: it only throws away the index, which is rebuilt on the next scan.
 
-## Known limitations (Milestone 1)
+## Known limitations
 
-- No AI/search yet — `/scan` only counts files, it does not index them.
-- No SQLite or FAISS integration yet.
+- OneDrive "online-only" placeholder files are skipped (reading them would
+  silently download them). Make a folder "Always keep on this device" if you
+  want Cortex to index it.
 - The Electron `start` script always compiles TypeScript before launching;
-  there's no file-watcher/hot-reload for the main process yet (the Next.js
-  renderer does hot-reload via its own dev server).
-- Packaging (a distributable installer) is not set up — `output: 'export'`
-  for the Next.js static build and an Electron packager (e.g. electron-builder)
-  are future work once there's a real UI to ship.
+  there's no hot-reload for the main process (the Next.js renderer does
+  hot-reload via its own dev server).
+- Packaging (a distributable installer) is not set up yet.
 
 ## Commands reference
 

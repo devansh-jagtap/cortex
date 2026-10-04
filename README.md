@@ -18,21 +18,22 @@ This repository is being built incrementally, one verified milestone at a time.
 
 ## Current status
 
-**Milestone 1 (foundation) — complete.**
+| Milestone | State |
+| --- | --- |
+| M1 · Electron + Next.js + FastAPI wired together | done |
+| M2 · Persistent incremental index (SQLite, EXIF, thumbnails, background jobs) | done |
+| M3 · Filesystem watcher | next |
+| M4 · Semantic search core (OpenCLIP + FAISS) | planned |
+| M5 · Search UI | planned |
+| M6 · Map view | planned |
 
-Electron, Next.js, and FastAPI are wired together end to end:
+What works today: add a folder and Cortex catalogs every photo in it in the
+background — dimensions, EXIF date/GPS/camera, and a 320px thumbnail — with
+a live progress bar, Cancel, and Resume. Re-scanning only touches new or
+changed files; moved files keep their record; deleted files are marked
+missing. Corrupt images are recorded and skipped without stopping the job.
 
-1. Electron opens a desktop window and loads the Next.js UI.
-2. The user clicks **Select Folder**, which opens a native OS folder picker
-   (via a secure Electron IPC bridge — no raw filesystem access is exposed to
-   the renderer).
-3. The selected path is sent to the FastAPI backend, which recursively scans
-   it and classifies files as supported images vs. everything else.
-4. The counts are displayed in the UI.
-
-Not yet implemented: AI embeddings, vector search, SQLite metadata storage,
-EXIF extraction, natural-language search, the image grid/results UI, and the
-map view. See `docs/roadmap.md` for what comes next and in what order.
+See [`docs/roadmap-revised.md`](docs/roadmap-revised.md) for the full plan.
 
 ## Stack
 

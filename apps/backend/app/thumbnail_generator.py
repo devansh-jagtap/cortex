@@ -1,51 +1,35 @@
-"""Generate thumbnail images."""
+"""Generate small JPEG previews. Writes only inside Cortex's storage dir."""
 
-from pathlib import Path
+from __future__ import annotations
 
-from PIL import Image
+from PIL import Image, ImageOps
+
+from app.storage import thumbnails_dir
 
 THUMBNAIL_SIZE = (320, 320)
-THUMBNAIL_DIR = Path(__file__).parent.parent.parent.parent / "storage" / "thumbnails"
+
+
+def thumbnail_path_for(content_hash: str):
+    return thumbnails_dir() / content_hash[:2] / f"{content_hash}.jpg"
 
 
 def generate_thumbnail(file_path: str, content_hash: str) -> str | None:
-    """Generate a thumbnail for an image.
+    target = thumbnail_path_for(content_hash)
+    if target.exists():
+        return str(target)
 
-    Args:
-        file_path: Path to the original image
-        content_hash: Hash of file contents (used as thumbnail id)
-
-    Returns:
-        Path to the saved thumbnail, or None if failed
-    """
-    THUMBNAIL_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Use first 2 chars of hash as subdirectory for better organization
-    subdir = THUMBNAIL_DIR / content_hash[:2]
-    subdir.mkdir(parents=True, exist_ok=True)
-    thumbnail_path = subdir / f"{content_hash}.jpg"
-
-    # If already exists, return it
-    if thumbnail_path.exists():
-        return str(thumbnail_path)
-
+    target.parent.mkdir(parents=True, exist_ok=True)
     try:
-        # Use draft() mode to downscale during decode (memory efficient)
         with Image.open(file_path) as img:
-            # Draft mode: optimize JPEG decoding to specified size
             if img.format == "JPEG":
-                img.draft("RGB", THUMBNAIL_SIZE)
-
-            # Convert to RGB if needed (handle RGBA, etc)
+                img.draft("RGB", (THUMBNAIL_SIZE[0] * 2, THUMBNAIL_SIZE[1] * 2))
+            img = ImageOps.exif_transpose(img)
             if img.mode != "RGB":
                 img = img.convert("RGB")
-
-            # Resize with high-quality downsampling
             img.thumbnail(THUMBNAIL_SIZE, Image.Resampling.LANCZOS)
-
-            # Save thumbnail
-            img.save(str(thumbnail_path), "JPEG", quality=85)
-            return str(thumbnail_path)
-
+            tmp = target.with_suffix(".tmp")
+            img.save(tmp, "JPEG", quality=85)
+            tmp.replace(target)
+        return str(target)
     except Exception:
         return None

@@ -228,7 +228,12 @@ Pillow stage is the right upgrade, not a broker.
 ### 4.3 Resource discipline (this matters on 8 GB)
 
 - The model is loaded **lazily on first use**, not at startup, and there is
-  exactly one instance (a singleton behind a lock).
+  exactly one instance (a singleton behind a lock). *As built:* once the
+  library has vectors, the worker warms the model in the background right
+  after startup (load + one throwaway query, ~15 s). Measured: without it
+  the first search after launch took 17.8 s; with it, 141 ms. The model is
+  needed for every new photo anyway, so this costs no extra memory in
+  practice.
 - Images are decoded with `Image.draft()` for JPEGs — the decoder itself
   downsamples during decode, so a 24-megapixel photo never exists in RAM at
   full size when all we need is 224×224 for CLIP and 320px for a thumbnail.
@@ -284,17 +289,25 @@ GET /images/{id}/thumbnail   → JPEG from storage/thumbnails (fast, small)
 GET /images/{id}/original    → streams the original file (detail view only)
 ```
 
-The renderer only ever knows ids. A path never appears in a URL, so there
-is no path-traversal surface. "Open Original" works the same way: the
-renderer calls `window.cortex.openFile(id)`; Electron main asks the backend
-for the path of that id, checks it is an existing regular file, then calls
-`shell.openPath`. The renderer never hands a path to Electron.
+The renderer only ever *requests* by id. It does show paths (you want to
+see exactly where a photo lives), but a path never appears in a URL and is
+never sent anywhere, so there is no path-traversal surface. "Open Original"
+works the same way: the renderer calls `window.cortex.openImage(id)` (or
+`showImageInFolder(id)`); Electron main checks the call came from the Cortex
+page, asks the backend for the path of that id, checks it is an existing
+file with an image extension, then calls `shell.openPath`. The renderer
+never hands a path to Electron. *As built (M5):* verified over CDP that the
+bridge exposes only these three methods, that the page has no Node access,
+and that non-integer, negative, and unknown ids are refused.
 
 The backend binds to `127.0.0.1` only. Any process on the machine running
 as the same user could hit it — but that process could also just read the
-photos directly, so this adds no new exposure. If we ever want defence in
-depth, Electron generates a per-launch token and the backend requires it;
-that is a ten-line change, deliberately deferred.
+photos directly, so this adds no new exposure. Web pages open in the user's
+browser can also send requests to `127.0.0.1`: CORS stops them from reading
+any response or sending JSON POSTs (which need a preflight), but a page
+could still *display* (not read) a thumbnail with an `<img>` tag. The fix is
+a per-launch token that Electron generates and the backend requires; it
+lands with packaging (M10), when Electron starts the backend itself.
 
 ---
 

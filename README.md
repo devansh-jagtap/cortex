@@ -23,9 +23,9 @@ This repository is being built incrementally, one verified milestone at a time.
 | M1 · Electron + Next.js + FastAPI wired together | done |
 | M2 · Persistent incremental index (SQLite, EXIF, thumbnails, background jobs) | done |
 | M3 · Filesystem watcher | done |
-| M4 · Semantic search core (OpenCLIP + FAISS) | done (API) |
-| M5 · Search UI | next |
-| M6 · Map view | planned |
+| M4 · Semantic search core (OpenCLIP + FAISS) | done |
+| M5 · Search UI | done |
+| M6 · Map view | next |
 
 What works today: add a folder and Cortex catalogs every photo in it in the
 background — dimensions, EXIF date/GPS/camera, and a 320px thumbnail — with
@@ -34,8 +34,11 @@ changed files; moved files keep their record; deleted files are marked
 missing. Corrupt images are recorded and skipped without stopping the job.
 Indexed folders are watched: new, edited, moved, and deleted photos are
 picked up automatically within a couple of seconds, with no Rescan needed.
-Every photo is embedded locally with OpenCLIP, and `POST /search` finds
-photos by meaning ("a privacy settings menu") in about 120 ms.
+Every photo is embedded locally with OpenCLIP, and searching by meaning
+("a privacy settings menu") takes about 150 ms. The app is search-first and
+keyboard-driven: type a description, arrow into the results, open a photo
+to see where it lives and when it was taken, and open the original in your
+default viewer.
 
 See [`docs/roadmap-revised.md`](docs/roadmap-revised.md) for the full plan.
 

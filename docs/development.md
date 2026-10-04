@@ -63,6 +63,23 @@ npm run dev:backend   # FastAPI only, from repo root
 npm run dev:web       # Next.js dev server only, from repo root
 ```
 
+## Using Cortex
+
+- **Search**: describe the photo ("a whiteboard with a diagram"). Results
+  come in as you type (after a short pause), or press Enter. Cortex shows
+  the photos close to the best match first; *Show more* reveals the rest.
+  If even the best match is weak, it says so instead of pretending.
+- **Keyboard**: `/` or `Ctrl+K` focuses search, `Esc` clears it, `↓` moves
+  into the results, arrow keys move between photos, `Enter` opens one,
+  `←`/`→` step through photos in the viewer, `Esc` closes it.
+- **Viewer**: the full photo, where it lives on disk, when it was taken,
+  its size, camera, location, and similarity to the search. *Open
+  original* and *Show in folder* work in the desktop app (the browser
+  preview has no access to your files by design).
+- **Library panel** (click the status in the top-right corner): the
+  folders Cortex watches, Rescan, Add folder, Index this computer, and
+  Cancel / Resume for a running or stopped scan.
+
 ## Verifying the backend independently
 
 ```bash

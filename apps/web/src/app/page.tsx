@@ -7,6 +7,7 @@ import {
   getImages,
   getIndexStatus,
   getLibrary,
+  getSuggestedRoots,
   startIndexing,
   thumbnailUrl,
   type ImageItem,
@@ -24,55 +25,67 @@ export default function Home() {
   const [totalImages, setTotalImages] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [hasBridge, setHasBridge] = useState(false);
-  const wasRunning = useRef(false);
+  const lastActivity = useRef<number | null | undefined>(undefined);
+  const lastRefresh = useRef(0);
 
   const refreshLibrary = useCallback(async () => {
+    lastRefresh.current = Date.now();
     const [lib, page] = await Promise.all([getLibrary(), getImages(PAGE_SIZE, 0)]);
     setLibrary(lib);
     setImages(page.items);
     setTotalImages(page.total);
   }, []);
 
+  // One adaptive status loop: fast while the worker is busy, slow when idle.
+  // The watcher can change the library at any time, so we always poll and
+  // refresh the grid whenever the backend reports new activity.
   useEffect(() => {
-    const tick = async () => {
-      setHasBridge(!!window.cortex);
-      const online = await checkBackendHealth();
-      setBackendOnline(online);
-      if (online && library === null) {
-        await refreshLibrary().catch(() => undefined);
-        setStatus(await getIndexStatus());
-      }
-    };
-    tick();
-    const interval = setInterval(tick, 5000);
-    return () => clearInterval(interval);
-  }, [library, refreshLibrary]);
-
-  const running = status.state === "running";
-
-  useEffect(() => {
-    if (!running) return;
-    wasRunning.current = true;
-    const interval = setInterval(async () => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const loop = async () => {
       try {
         const next = await getIndexStatus();
+        if (cancelled) return;
+        setHasBridge(!!window.cortex);
+        setBackendOnline(true);
         setStatus(next);
-        if (next.state !== "running" && wasRunning.current) {
-          wasRunning.current = false;
+        const activityChanged = next.last_activity_at !== lastActivity.current;
+        const scanProgressed = next.busy && Date.now() - lastRefresh.current > 3000;
+        if (activityChanged || scanProgressed) {
+          lastActivity.current = next.last_activity_at;
           await refreshLibrary();
         }
+        timer = setTimeout(loop, next.busy ? 400 : 2000);
       } catch {
-        // backend briefly unreachable; the health check will surface it
+        if (cancelled) return;
+        setBackendOnline(await checkBackendHealth());
+        timer = setTimeout(loop, 3000);
       }
-    }, 400);
-    return () => clearInterval(interval);
-  }, [running, refreshLibrary]);
+    };
+    loop();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [refreshLibrary]);
+
+  const running = status.state === "running";
 
   async function beginIndexing(path: string) {
     setErrorMessage(null);
     try {
       await startIndexing(path);
       setStatus(await getIndexStatus());
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Could not start indexing.");
+    }
+  }
+
+  async function handleIndexComputer() {
+    setErrorMessage(null);
+    try {
+      const { home } = await getSuggestedRoots();
+      await beginIndexing(home);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "Could not start indexing.");
     }
@@ -103,10 +116,10 @@ export default function Home() {
           <span className="hidden text-sm text-neutral-500 sm:inline">Search your files with AI</span>
         </div>
         <div className="flex items-center gap-4">
-          <BackendDot online={backendOnline} hasBridge={hasBridge} />
+          <BackendDot online={backendOnline} hasBridge={hasBridge} status={status} />
           <button
             onClick={handleAddFolder}
-            disabled={running || !backendOnline}
+            disabled={!backendOnline}
             className="rounded-full bg-neutral-50 px-4 py-2 text-sm font-medium text-neutral-950 transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Add folder
@@ -131,9 +144,23 @@ export default function Home() {
           <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-center">
             <p className="text-2xl font-semibold tracking-tight">Your library is empty</p>
             <p className="max-w-sm text-sm text-neutral-400">
-              Add a folder and Cortex will catalog every photo in it. Your files are never moved,
-              renamed, or uploaded.
+              Cortex catalogs the photos on this computer and keeps watching for new ones. Your
+              files are never moved, renamed, or uploaded.
             </p>
+            <div className="mt-3 flex gap-3">
+              <button
+                onClick={handleIndexComputer}
+                className="rounded-full bg-neutral-50 px-5 py-2.5 text-sm font-medium text-neutral-950 hover:opacity-90"
+              >
+                Index this computer
+              </button>
+              <button
+                onClick={handleAddFolder}
+                className="rounded-full border border-neutral-700 px-5 py-2.5 text-sm text-neutral-200 hover:bg-neutral-900"
+              >
+                Choose a folder
+              </button>
+            </div>
           </div>
         )}
 
@@ -159,7 +186,7 @@ export default function Home() {
                     </span>
                     <button
                       onClick={() => beginIndexing(root.path)}
-                      disabled={running}
+                      disabled={running && status.stats?.root_path === root.path}
                       className="rounded-full border border-neutral-700 px-3 py-1 text-xs text-neutral-200 transition-colors hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       Rescan
@@ -210,11 +237,32 @@ export default function Home() {
   );
 }
 
-function BackendDot({ online, hasBridge }: { online: boolean | null; hasBridge: boolean }) {
+function BackendDot({
+  online,
+  hasBridge,
+  status,
+}: {
+  online: boolean | null;
+  hasBridge: boolean;
+  status: IndexStatus;
+}) {
+  let label = "Connecting…";
+  if (online === false) label = "Backend offline";
+  else if (online) {
+    const watching = status.watching ?? 0;
+    if (status.updating) label = "Updating changes…";
+    else if (watching > 0) label = `Watching ${watching} folder${watching === 1 ? "" : "s"}`;
+    else label = "Backend connected";
+    if (!status.busy && status.last_activity_at) label += ` · updated ${formatRelative(status.last_activity_at)}`;
+  }
   return (
     <span className="flex items-center gap-2 text-xs text-neutral-500">
-      <span className={`h-1.5 w-1.5 rounded-full ${online ? "bg-emerald-500" : online === null ? "bg-neutral-600" : "bg-red-500"}`} />
-      {online === null ? "Connecting…" : online ? "Backend connected" : "Backend offline"}
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${
+          online ? (status.busy ? "animate-pulse bg-sky-400" : "bg-emerald-500") : online === null ? "bg-neutral-600" : "bg-red-500"
+        }`}
+      />
+      {label}
       {!hasBridge && <span className="hidden md:inline"> · browser preview</span>}
     </span>
   );

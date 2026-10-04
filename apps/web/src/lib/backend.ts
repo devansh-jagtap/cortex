@@ -27,6 +27,11 @@ export interface IndexStatus {
   finished_at?: number | null;
   error?: string | null;
   stats?: IndexStats;
+  busy?: boolean;
+  updating?: boolean;
+  queued_scans?: number;
+  last_activity_at?: number | null;
+  watching?: number;
 }
 
 export interface Library {
@@ -85,6 +90,8 @@ export const cancelIndexing = () => request<{ cancelled: boolean }>("/index/canc
 export const getIndexStatus = () => request<IndexStatus>("/index/status");
 
 export const getLibrary = () => request<Library>("/library");
+
+export const getSuggestedRoots = () => request<{ home: string }>("/roots/suggested");
 
 export const getImages = (limit: number, offset: number) =>
   request<ImagePage>(`/images?limit=${limit}&offset=${offset}`);

@@ -44,6 +44,7 @@ class IndexJobManager:
     def __init__(self, search: SearchService | None = None) -> None:
         self._search = search
         self._embedding: dict = {"state": "idle"}
+        self._warmed = False
         self._cv = threading.Condition()
         self._queue: deque[_Task] = deque()
         self._current: _Task | None = None
@@ -220,6 +221,14 @@ class IndexJobManager:
             raise
         finally:
             self._search.sync()
+        if self._search.indexed_vectors() and not self._warmed:
+            # Load the model and run one throwaway query now: together they
+            # take ~15 s, which would otherwise land on the user's first search.
+            try:
+                self._search.embedder.embed_text("a photo")
+                self._warmed = True
+            except Exception:
+                log.exception("could not load the AI model")
 
     def _create_job_row(self, root_path: str) -> int:
         conn = get_connection()

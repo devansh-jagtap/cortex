@@ -59,7 +59,7 @@ class OpenClipEmbedder:
             "name": self.name,
             "state": self._state,
             "device": self._device,
-            "downloaded": self._weights_present(),
+            "downloaded": self._state == "ready" or self._weights_present(),
             "error": self._error,
         }
 

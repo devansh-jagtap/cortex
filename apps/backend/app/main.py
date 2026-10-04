@@ -105,7 +105,12 @@ def index_start(request: PathRequest) -> dict:
 
 @app.get("/index/status")
 def index_status() -> dict:
-    return {**jobs.status(), "watching": watcher.watched_roots()}
+    model = search_service.embedder.status()
+    return {
+        **jobs.status(),
+        "watching": watcher.watched_roots(),
+        "model": {"state": model["state"], "device": model["device"], "error": model["error"]},
+    }
 
 
 @app.get("/roots/suggested")
@@ -232,6 +237,25 @@ def image_metadata(image_id: int) -> dict:
     if not row:
         raise HTTPException(status_code=404, detail="Image not found")
     return dict(row)
+
+
+_MEDIA_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+
+
+@app.get("/images/{image_id}/original")
+def image_original(image_id: int) -> FileResponse:
+    """The full-size photo, by id only: the renderer never sends a path."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT path FROM files WHERE id = ? AND status = 'indexed'", (image_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    media_type = _MEDIA_TYPES.get(os.path.splitext(row["path"])[1].lower()) if row else None
+    if not row or media_type is None or not os.path.isfile(row["path"]):
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(row["path"], media_type=media_type)
 
 
 @app.get("/images/{image_id}/thumbnail")

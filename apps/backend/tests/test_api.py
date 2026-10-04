@@ -163,3 +163,25 @@ def test_job_left_running_by_a_crash_is_reported_interrupted(tmp_path):
     assert status["state"] == "interrupted"
     assert status["stats"]["root_path"] == str(tmp_path)
     assert status["stats"]["processed"] == 4
+
+
+def test_original_is_served_by_id_and_404s_once_deleted(tmp_path):
+    from tests.images import make_image
+
+    path = make_image(tmp_path / "a.jpg", size=(640, 480))
+    _run_index(tmp_path)
+    image_id = client.get("/images").json()["items"][0]["id"]
+
+    response = client.get(f"/images/{image_id}/original")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    assert response.content == path.read_bytes()
+
+    path.unlink()
+    assert client.get(f"/images/{image_id}/original").status_code == 404
+
+
+def test_status_includes_model_state():
+    body = client.get("/index/status").json()
+
+    assert body["model"]["state"] == "ready"

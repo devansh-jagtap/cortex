@@ -32,6 +32,22 @@ export interface IndexStatus {
   queued_scans?: number;
   last_activity_at?: number | null;
   watching?: number;
+  embedding?: EmbeddingStatus;
+  model?: ModelStatus;
+}
+
+export interface EmbeddingStatus {
+  state: "idle" | "running" | "done" | "cancelled" | "error";
+  total?: number;
+  processed?: number;
+  failed?: number;
+  error?: string | null;
+}
+
+export interface ModelStatus {
+  state: "not_loaded" | "downloading" | "loading" | "ready" | "error";
+  device: string | null;
+  error: string | null;
 }
 
 export interface Library {
@@ -52,6 +68,17 @@ export interface ImageItem {
   longitude: number | null;
   camera_make: string | null;
   camera_model: string | null;
+}
+
+export interface SearchResult extends ImageItem {
+  score: number;
+}
+
+export interface SearchResponse {
+  query: string;
+  results: SearchResult[];
+  took_ms: number;
+  searched: number;
 }
 
 export interface ImagePage {
@@ -96,4 +123,13 @@ export const getSuggestedRoots = () => request<{ home: string }>("/roots/suggest
 export const getImages = (limit: number, offset: number) =>
   request<ImagePage>(`/images?limit=${limit}&offset=${offset}`);
 
+export const searchPhotos = (query: string, limit: number, signal?: AbortSignal) =>
+  request<SearchResponse>("/search", {
+    method: "POST",
+    body: JSON.stringify({ query, limit }),
+    signal,
+  });
+
 export const thumbnailUrl = (id: number) => `${BACKEND_URL}/images/${id}/thumbnail`;
+
+export const originalUrl = (id: number) => `${BACKEND_URL}/images/${id}/original`;

@@ -1,6 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+
+import { PhotoGrid, type PhotoGridHandle } from "@/components/photo-grid";
+import { PhotoViewer } from "@/components/photo-viewer";
+import { SearchField } from "@/components/search-field";
+import { StatusMenu, progressOf } from "@/components/status-menu";
+import { Button } from "@/components/ui/button";
 import {
   cancelIndexing,
   checkBackendHealth,
@@ -8,37 +14,61 @@ import {
   getIndexStatus,
   getLibrary,
   getSuggestedRoots,
+  searchPhotos,
   startIndexing,
-  thumbnailUrl,
   type ImageItem,
   type IndexStatus,
   type Library,
+  type SearchResponse,
 } from "@/lib/backend";
+import { plural } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 120;
+const RESULT_LIMIT = 120;
+const SEARCH_DELAY_MS = 350;
+// CLIP similarity isn't comparable across queries, so "relevant" is judged
+// relative to the best hit: results close to it are shown first, the rest
+// behind "Show more". A weak best hit means nothing really matches.
+// Both numbers were tuned on real searches with ViT-B/32.
+const CLOSE_TO_BEST = 0.07;
+const WEAK_BEST_SCORE = 0.22;
 
 export default function Home() {
-  const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
+  const [online, setOnline] = useState<boolean | null>(null);
   const [status, setStatus] = useState<IndexStatus>({ state: "idle" });
   const [library, setLibrary] = useState<Library | null>(null);
-  const [images, setImages] = useState<ImageItem[]>([]);
-  const [totalImages, setTotalImages] = useState(0);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<ImageItem[]>([]);
+  const [photoTotal, setPhotoTotal] = useState(0);
   const [hasBridge, setHasBridge] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SearchResponse | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const [expandedQuery, setExpandedQuery] = useState<string | null>(null);
+
+  const inputRef = useRef<HTMLInputElement>(null);
+  const gridRef = useRef<PhotoGridHandle>(null);
   const lastActivity = useRef<number | null | undefined>(undefined);
   const lastRefresh = useRef(0);
+  const searchSeq = useRef(0);
+  const searchAbort = useRef<AbortController | null>(null);
+  const lastQuery = useRef("");
 
   const refreshLibrary = useCallback(async () => {
     lastRefresh.current = Date.now();
     const [lib, page] = await Promise.all([getLibrary(), getImages(PAGE_SIZE, 0)]);
     setLibrary(lib);
-    setImages(page.items);
-    setTotalImages(page.total);
+    setPhotos(page.items);
+    setPhotoTotal(page.total);
   }, []);
 
-  // One adaptive status loop: fast while the worker is busy, slow when idle.
-  // The watcher can change the library at any time, so we always poll and
-  // refresh the grid whenever the backend reports new activity.
+  // One adaptive status loop: fast while Cortex is busy, slow when idle. The
+  // watcher can change the library at any moment, so the grid refreshes
+  // whenever the engine reports new activity.
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
@@ -47,18 +77,18 @@ export default function Home() {
         const next = await getIndexStatus();
         if (cancelled) return;
         setHasBridge(!!window.cortex);
-        setBackendOnline(true);
+        setOnline(true);
         setStatus(next);
         const activityChanged = next.last_activity_at !== lastActivity.current;
-        const scanProgressed = next.busy && Date.now() - lastRefresh.current > 3000;
-        if (activityChanged || scanProgressed) {
+        const longRunning = next.busy && Date.now() - lastRefresh.current > 3000;
+        if (activityChanged || longRunning) {
           lastActivity.current = next.last_activity_at;
           await refreshLibrary();
         }
         timer = setTimeout(loop, next.busy ? 400 : 2000);
       } catch {
         if (cancelled) return;
-        setBackendOnline(await checkBackendHealth());
+        setOnline(await checkBackendHealth());
         timer = setTimeout(loop, 3000);
       }
     };
@@ -69,303 +99,255 @@ export default function Home() {
     };
   }, [refreshLibrary]);
 
-  const running = status.state === "running";
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const typing = (e.target as HTMLElement).closest("input, textarea, [contenteditable='true']");
+      const slash = e.key === "/" && !typing;
+      const commandK = e.key.toLowerCase() === "k" && (e.ctrlKey || e.metaKey);
+      if (slash || commandK) {
+        e.preventDefault();
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const runSearch = useCallback(async (text: string) => {
+    const q = text.trim();
+    if (q === lastQuery.current) return;
+    lastQuery.current = q;
+    searchAbort.current?.abort();
+    if (!q) {
+      setResults(null);
+      setSearching(false);
+      setSearchError(null);
+      return;
+    }
+    const controller = new AbortController();
+    searchAbort.current = controller;
+    const seq = ++searchSeq.current;
+    setSearching(true);
+    setSearchError(null);
+    try {
+      const response = await searchPhotos(q, RESULT_LIMIT, controller.signal);
+      if (seq === searchSeq.current) {
+        setResults(response);
+        setViewerIndex(null);
+      }
+    } catch (err) {
+      if (controller.signal.aborted || seq !== searchSeq.current) return;
+      lastQuery.current = "";
+      setSearchError(err instanceof Error ? err.message : "Search didn't work.");
+    } finally {
+      if (seq === searchSeq.current) setSearching(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => runSearch(query), query.trim() ? SEARCH_DELAY_MS : 0);
+    return () => clearTimeout(timer);
+  }, [query, runSearch]);
 
   async function beginIndexing(path: string) {
-    setErrorMessage(null);
+    setNotice(null);
     try {
       await startIndexing(path);
       setStatus(await getIndexStatus());
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "Could not start indexing.");
-    }
-  }
-
-  async function handleIndexComputer() {
-    setErrorMessage(null);
-    try {
-      const { home } = await getSuggestedRoots();
-      await beginIndexing(home);
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "Could not start indexing.");
+      setNotice(err instanceof Error ? err.message : "Couldn't start indexing.");
     }
   }
 
   async function handleAddFolder() {
-    if (!window.cortex) {
-      setErrorMessage("Folder selection is only available inside the Cortex desktop app.");
-      return;
-    }
-    const path = await window.cortex.selectFolder();
+    const path = await window.cortex?.selectFolder();
     if (path) await beginIndexing(path);
   }
 
-  async function handleLoadMore() {
-    const page = await getImages(PAGE_SIZE, images.length);
-    setImages((prev) => [...prev, ...page.items]);
-    setTotalImages(page.total);
+  async function handleIndexComputer() {
+    try {
+      const { home } = await getSuggestedRoots();
+      const ok = window.confirm(
+        `Index every photo in ${home}?\n\nThe first run can take a while. You can keep working; Cortex runs in the background and skips system and app folders.`,
+      );
+      if (ok) await beginIndexing(home);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Couldn't start indexing.");
+    }
   }
 
-  const isEmpty = library !== null && library.images_indexed === 0 && library.roots.length === 0;
+  async function handleLoadMore() {
+    const page = await getImages(PAGE_SIZE, photos.length);
+    setPhotos((prev) => [...prev, ...page.items]);
+    setPhotoTotal(page.total);
+  }
+
+  const best = results?.results[0]?.score ?? 0;
+  const closeCount = results ? results.results.filter((r) => r.score >= best - CLOSE_TO_BEST).length : 0;
+  const expanded = results !== null && expandedQuery === results.query;
+  const items: ImageItem[] = results ? (expanded ? results.results : results.results.slice(0, closeCount)) : photos;
+  const weak = results !== null && results.results.length > 0 && best < WEAK_BEST_SCORE;
+  const hasLibrary = library !== null && library.roots.length > 0;
+  const progress = progressOf(status);
+  const analyzing = status.embedding?.state === "running";
 
   return (
-    <div className="flex min-h-screen flex-1 flex-col bg-neutral-950 text-neutral-50">
-      <header className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-neutral-900 bg-neutral-950/90 px-6 py-4 backdrop-blur">
-        <div className="flex items-baseline gap-3">
-          <h1 className="text-lg font-semibold tracking-tight">CORTEX</h1>
-          <span className="hidden text-sm text-neutral-500 sm:inline">Search your files with AI</span>
+    <div className="flex min-h-screen flex-1 flex-col">
+      <header className="sticky top-0 z-20 border-b border-border/70 bg-background/85 backdrop-blur-md">
+        <div className="mx-auto flex h-12 w-full max-w-[1240px] items-center justify-between gap-6 px-6">
+          <span className="font-serif text-[22px] leading-none tracking-[-0.01em]">Cortex</span>
+          <StatusMenu
+            status={status}
+            online={online}
+            library={library}
+            hasBridge={hasBridge}
+            onAddFolder={handleAddFolder}
+            onIndexComputer={handleIndexComputer}
+            onScan={beginIndexing}
+            onCancel={() => void cancelIndexing()}
+          />
         </div>
-        <div className="flex items-center gap-4">
-          <BackendDot online={backendOnline} hasBridge={hasBridge} status={status} />
-          <button
-            onClick={handleAddFolder}
-            disabled={!backendOnline}
-            className="rounded-full bg-neutral-50 px-4 py-2 text-sm font-medium text-neutral-950 transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Add folder
-          </button>
-        </div>
+        {progress !== null && (
+          <div
+            aria-hidden
+            className="absolute bottom-[-1px] left-0 h-px bg-star shadow-[0_0_6px_var(--star)] transition-[width] duration-300"
+            style={{ width: `${Math.max(2, progress * 100)}%` }}
+          />
+        )}
       </header>
 
-      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-6 py-6">
-        {errorMessage && (
-          <p role="alert" className="rounded-lg border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-            {errorMessage}
+      <main className="mx-auto flex w-full max-w-[1240px] flex-1 flex-col px-6 pb-20">
+        {notice && (
+          <p role="alert" className="mt-4 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
+            {notice}
           </p>
         )}
 
-        <JobPanel
-          status={status}
-          onCancel={() => cancelIndexing()}
-          onResume={(path) => beginIndexing(path)}
-        />
+        {online === false && <Offline />}
 
-        {isEmpty && !running && (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-center">
-            <p className="text-2xl font-semibold tracking-tight">Your library is empty</p>
-            <p className="max-w-sm text-sm text-neutral-400">
-              Cortex catalogs the photos on this computer and keeps watching for new ones. Your
-              files are never moved, renamed, or uploaded.
-            </p>
-            <div className="mt-3 flex gap-3">
-              <button
-                onClick={handleIndexComputer}
-                className="rounded-full bg-neutral-50 px-5 py-2.5 text-sm font-medium text-neutral-950 hover:opacity-90"
-              >
-                Index this computer
-              </button>
-              <button
-                onClick={handleAddFolder}
-                className="rounded-full border border-neutral-700 px-5 py-2.5 text-sm text-neutral-200 hover:bg-neutral-900"
-              >
-                Choose a folder
-              </button>
-            </div>
-          </div>
+        {online && library && !hasLibrary && (
+          <Welcome hasBridge={hasBridge} onIndexComputer={handleIndexComputer} onAddFolder={handleAddFolder} />
         )}
 
-        {library && library.roots.length > 0 && (
-          <section className="flex flex-col gap-2">
-            <div className="flex items-baseline justify-between">
-              <h2 className="text-sm font-medium text-neutral-300">
-                {library.images_indexed.toLocaleString()} photos indexed
-                {library.images_with_gps > 0 && (
-                  <span className="text-neutral-500"> · {library.images_with_gps.toLocaleString()} with location</span>
-                )}
-              </h2>
-            </div>
-            <ul className="flex flex-col divide-y divide-neutral-900 rounded-xl border border-neutral-900">
-              {library.roots.map((root) => (
-                <li key={root.id} className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
-                  <span className="truncate text-neutral-300" title={root.path}>
-                    {root.path}
-                  </span>
-                  <span className="flex shrink-0 items-center gap-3">
-                    <span className="text-xs text-neutral-500">
-                      {root.last_scanned_at ? `Scanned ${formatRelative(root.last_scanned_at)}` : "Not finished"}
+        {hasLibrary && (
+          <>
+            <section className={cn("transition-[padding] duration-300", results ? "pt-8 pb-6" : "pt-[11vh] pb-10")}>
+              <SearchField
+                ref={inputRef}
+                value={query}
+                compact={!!results}
+                searching={searching}
+                onChange={setQuery}
+                onSubmit={() => {
+                  lastQuery.current = "";
+                  void runSearch(query);
+                }}
+                onPickExample={(example) => {
+                  setQuery(example);
+                  void runSearch(example);
+                }}
+                onLeaveDown={() => gridRef.current?.focusFirst()}
+              />
+              <p className="mt-5 text-sm text-muted-foreground" aria-live="polite">
+                {searchError ? (
+                  <span className="text-destructive">Search didn&apos;t work: {searchError}</span>
+                ) : searching && status.model?.state !== "ready" ? (
+                  "Loading the AI model. The first search after Cortex starts takes a few seconds."
+                ) : results ? (
+                  results.searched === 0 ? (
+                    "Search starts working once Cortex has analyzed your photos."
+                  ) : (
+                    <>
+                      <span className="text-foreground/90">
+                        {weak
+                          ? `Nothing looks much like “${results.query}”. These are the nearest.`
+                          : `${plural(items.length, "photo")} closest to “${results.query}”`}
+                      </span>
+                      <span className="ml-2 tabular-nums">{results.took_ms} ms</span>
+                      {analyzing && <span className="ml-2">Still analyzing new photos, so results may improve.</span>}
+                    </>
+                  )
+                ) : (
+                  <>
+                    <span className="text-foreground/90">
+                      {plural(library.images_indexed, "photo")} from {plural(library.roots.length, "folder")}
                     </span>
-                    <button
-                      onClick={() => beginIndexing(root.path)}
-                      disabled={running && status.stats?.root_path === root.path}
-                      className="rounded-full border border-neutral-700 px-3 py-1 text-xs text-neutral-200 transition-colors hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      Rescan
-                    </button>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
+                    {analyzing && <span className="ml-2">Analyzing photos for search…</span>}
+                  </>
+                )}
+              </p>
+            </section>
 
-        {images.length > 0 && (
-          <section className="flex flex-col gap-4">
-            <ul className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2">
-              {images.map((image) => (
-                <li
-                  key={image.id}
-                  className="group relative aspect-square overflow-hidden rounded-lg bg-neutral-900"
-                  title={`${image.filename}${image.width ? ` · ${image.width}×${image.height}` : ""}`}
-                >
-                  {/* Plain <img>: thumbnails come from the local backend; next/image's optimizer adds nothing here. */}
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={thumbnailUrl(image.id)}
-                    alt={image.filename}
-                    loading="lazy"
-                    decoding="async"
-                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-                  />
-                  <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/80 to-transparent px-2 pb-1.5 pt-6 text-[11px] text-neutral-200 opacity-0 transition-opacity group-hover:opacity-100">
-                    {image.filename}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            {images.length < totalImages && (
-              <button
-                onClick={handleLoadMore}
-                className="self-center rounded-full border border-neutral-700 px-4 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
-              >
-                Load more ({(totalImages - images.length).toLocaleString()} left)
-              </button>
+            {items.length > 0 && (
+              <PhotoGrid
+                revealKey={results ? `search:${results.query}` : "library"}
+                ref={gridRef}
+                items={items}
+                onOpen={setViewerIndex}
+                onLeaveUp={() => inputRef.current?.focus()}
+              />
             )}
-          </section>
+
+            {results && !expanded && results.results.length > items.length && (
+              <Button variant="outline" className="mt-8 self-center" onClick={() => setExpandedQuery(results.query)}>
+                Show {(results.results.length - items.length).toLocaleString()} more
+              </Button>
+            )}
+
+            {!results && photos.length < photoTotal && (
+              <Button variant="outline" className="mt-8 self-center" onClick={handleLoadMore}>
+                Show {Math.min(PAGE_SIZE, photoTotal - photos.length).toLocaleString()} more
+              </Button>
+            )}
+          </>
         )}
       </main>
+
+      <PhotoViewer items={items} index={viewerIndex} hasBridge={hasBridge} onIndexChange={setViewerIndex} />
     </div>
   );
 }
 
-function BackendDot({
-  online,
+function Welcome({
   hasBridge,
-  status,
+  onIndexComputer,
+  onAddFolder,
 }: {
-  online: boolean | null;
   hasBridge: boolean;
-  status: IndexStatus;
+  onIndexComputer: () => void;
+  onAddFolder: () => void;
 }) {
-  let label = "Connecting…";
-  if (online === false) label = "Backend offline";
-  else if (online) {
-    const watching = status.watching ?? 0;
-    if (status.updating) label = "Updating changes…";
-    else if (watching > 0) label = `Watching ${watching} folder${watching === 1 ? "" : "s"}`;
-    else label = "Backend connected";
-    if (!status.busy && status.last_activity_at) label += ` · updated ${formatRelative(status.last_activity_at)}`;
-  }
   return (
-    <span className="flex items-center gap-2 text-xs text-neutral-500">
-      <span
-        className={`h-1.5 w-1.5 rounded-full ${
-          online ? (status.busy ? "animate-pulse bg-sky-400" : "bg-emerald-500") : online === null ? "bg-neutral-600" : "bg-red-500"
-        }`}
-      />
-      {label}
-      {!hasBridge && <span className="hidden md:inline"> · browser preview</span>}
-    </span>
-  );
-}
-
-function JobPanel({
-  status,
-  onCancel,
-  onResume,
-}: {
-  status: IndexStatus;
-  onCancel: () => void;
-  onResume: (path: string) => void;
-}) {
-  const stats = status.stats;
-  if (!stats || status.state === "idle") return null;
-
-  const total = stats.supported_images;
-  const pct = total > 0 ? Math.min(100, Math.round((stats.processed / total) * 100)) : 0;
-  const folder = stats.root_path;
-
-  if (status.state === "running") {
-    return (
-      <section aria-live="polite" className="flex flex-col gap-3 rounded-xl border border-neutral-800 bg-neutral-900 p-5">
-        <div className="flex items-baseline justify-between gap-4">
-          <p className="text-sm font-medium">
-            Indexing{" "}
-            <span className="tabular-nums">
-              {stats.processed.toLocaleString()} / {total.toLocaleString()}
-            </span>
-          </p>
-          <button onClick={onCancel} className="text-xs text-neutral-400 hover:text-neutral-100">
-            Cancel
-          </button>
-        </div>
-        <div className="h-1.5 overflow-hidden rounded-full bg-neutral-800">
-          <div className="h-full rounded-full bg-emerald-500 transition-[width] duration-300" style={{ width: `${pct}%` }} />
-        </div>
-        <p className="truncate text-xs text-neutral-500" title={stats.current_file ?? folder}>
-          {stats.current_file ? baseName(stats.current_file) : `Looking for photos in ${folder}…`}
-        </p>
-      </section>
-    );
-  }
-
-  if (status.state === "interrupted" || status.state === "cancelled" || status.state === "failed") {
-    const label =
-      status.state === "failed"
-        ? `Indexing failed${status.error ? `: ${status.error}` : ""}`
-        : status.state === "cancelled"
-          ? "Indexing was cancelled"
-          : "Indexing was interrupted when Cortex closed";
-    return (
-      <section className="flex items-center justify-between gap-4 rounded-xl border border-amber-900/50 bg-amber-950/20 p-4">
-        <div className="min-w-0">
-          <p className="text-sm text-amber-200">{label}</p>
-          <p className="truncate text-xs text-neutral-500">
-            {stats.processed.toLocaleString()} of {total.toLocaleString()} photos done · {folder}
-          </p>
-        </div>
-        <button
-          onClick={() => onResume(folder)}
-          className="shrink-0 rounded-full bg-neutral-50 px-4 py-1.5 text-xs font-medium text-neutral-950 hover:opacity-90"
-        >
-          Resume
-        </button>
-      </section>
-    );
-  }
-
-  const parts = [
-    stats.new_images && `${stats.new_images.toLocaleString()} new`,
-    stats.changed_images && `${stats.changed_images.toLocaleString()} updated`,
-    stats.moved_images && `${stats.moved_images.toLocaleString()} moved`,
-    stats.removed_images && `${stats.removed_images.toLocaleString()} removed`,
-    stats.unchanged_images && `${stats.unchanged_images.toLocaleString()} unchanged`,
-  ].filter(Boolean);
-
-  return (
-    <section className="flex flex-col gap-1 rounded-xl border border-neutral-900 p-4 text-sm">
-      <p className="text-neutral-300">
-        Finished {folder && <span className="text-neutral-500">{baseName(folder)}</span>}
-        {parts.length > 0 && <span className="text-neutral-500"> · {parts.join(" · ")}</span>}
+    <section className="flex max-w-xl flex-1 flex-col justify-center gap-5 py-20">
+      <h1 className="font-serif text-[44px] leading-[1.1] tracking-[-0.01em]">Find any photo by describing it.</h1>
+      <p className="max-w-md text-[15px] leading-relaxed text-muted-foreground">
+        Cortex looks at the photos on this computer and keeps watching for new ones, so you can search for “the
+        whiteboard from Tuesday” instead of IMG_4821. Nothing leaves this computer.
       </p>
-      {(stats.failed > 0 || (stats.placeholders ?? 0) > 0) && (
-        <p className="text-xs text-amber-400">
-          {stats.failed > 0 && `${stats.failed} file(s) couldn't be read. `}
-          {(stats.placeholders ?? 0) > 0 &&
-            `${stats.placeholders} online-only OneDrive file(s) were skipped to avoid downloading them.`}
-        </p>
+      <div className="flex flex-wrap gap-3 pt-2">
+        <Button size="lg" onClick={onIndexComputer}>
+          Index this computer
+        </Button>
+        <Button size="lg" variant="outline" disabled={!hasBridge} onClick={onAddFolder}>
+          Choose a folder
+        </Button>
+      </div>
+      {!hasBridge && (
+        <p className="text-xs text-muted-foreground">Choosing a folder works in the Cortex desktop app.</p>
       )}
     </section>
   );
 }
 
-function baseName(path: string) {
-  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
-}
-
-function formatRelative(unixSeconds: number) {
-  const diff = Date.now() / 1000 - unixSeconds;
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return new Date(unixSeconds * 1000).toLocaleDateString();
+function Offline() {
+  return (
+    <section className="flex max-w-xl flex-1 flex-col justify-center gap-3 py-20">
+      <h1 className="font-serif text-[36px] leading-tight">The Cortex engine isn&apos;t running.</h1>
+      <p className="text-[15px] leading-relaxed text-muted-foreground">
+        Start it from the project folder with <code className="rounded bg-card px-1.5 py-0.5 text-foreground">npm run dev</code>.
+        This page reconnects on its own.
+      </p>
+    </section>
+  );
 }

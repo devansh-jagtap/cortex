@@ -20,14 +20,32 @@ from app.database import get_connection
 from app.jobs import IndexJobManager, JobAlreadyRunning
 from app.scanner import scan_folder
 from app.storage import thumbnails_dir
+from app.watcher import FolderWatcher
 
 jobs = IndexJobManager()
+watcher = FolderWatcher(jobs.submit_changes)
+
+
+def _root_paths() -> list[str]:
+    conn = get_connection()
+    try:
+        return [r["path"] for r in conn.execute("SELECT path FROM roots ORDER BY added_at")]
+    finally:
+        conn.close()
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     jobs.recover_interrupted()
+    watcher.start()
+    for path in _root_paths():
+        if os.path.isdir(path):
+            watcher.watch(path)
+            # Catch up on anything that changed while Cortex was closed.
+            # Incremental, so unchanged files are not even read.
+            jobs.start(path)
     yield
+    watcher.stop()
     jobs.cancel()
 
 
@@ -75,13 +93,20 @@ def index_start(request: PathRequest) -> dict:
     try:
         job_id = jobs.start(path)
     except JobAlreadyRunning:
-        raise HTTPException(status_code=409, detail="An indexing job is already running")
+        raise HTTPException(status_code=409, detail="This folder is already being indexed")
+    watcher.watch(path)
     return {"job_id": job_id}
 
 
 @app.get("/index/status")
 def index_status() -> dict:
-    return jobs.status()
+    return {**jobs.status(), "watching": watcher.watched_roots()}
+
+
+@app.get("/roots/suggested")
+def suggested_roots() -> dict:
+    """The folder "Index this computer" starts from: the user's home folder."""
+    return {"home": os.path.expanduser("~")}
 
 
 @app.post("/index/cancel")

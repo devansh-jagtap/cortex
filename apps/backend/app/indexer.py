@@ -17,9 +17,10 @@ import hashlib
 import os
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Callable
+from typing import Callable, Iterable
 
 from app.database import get_connection
+from app.exclusions import is_excluded, skip_dir
 from app.exif_extractor import extract_image_metadata
 from app.scanner import SUPPORTED_IMAGE_EXTENSIONS
 from app.thumbnail_generator import generate_thumbnail
@@ -95,12 +96,8 @@ def index_folder(
                 raise IndexCancelled()
 
             stats.current_file = file_path
-            seen.add(file_path)
-            try:
-                _index_one(conn, root_id, file_path, stats)
-            except Exception as exc:
-                stats.failed += 1
-                stats.errors.append(f"{file_path}: {type(exc).__name__}: {exc}")
+            if _index_safely(conn, root_id, file_path, stats):
+                seen.add(file_path)
             stats.processed += 1
 
             # Commit per file: a crash loses nothing, and the write lock is
@@ -121,12 +118,96 @@ def index_folder(
     return stats
 
 
+def apply_changes(paths: Iterable[str]) -> IndexStats:
+    """Bring specific changed paths (from the filesystem watcher) up to date.
+
+    Existing paths are indexed first and vanished ones marked missing last,
+    so a rename relinks the old record by hash before anything is removed.
+    A vanished path may have been a folder, so everything under it goes too.
+    """
+    stats = IndexStats(root_path="")
+    conn = get_connection()
+    try:
+        roots = [(r["id"], r["path"]) for r in conn.execute("SELECT id, path FROM roots")]
+        existing, vanished = [], []
+        for path in sorted(set(paths)):
+            (existing if os.path.exists(path) else vanished).append(path)
+
+        for path in existing:
+            root = _root_for(path, roots)
+            if root is None:
+                continue
+            root_id, root_path = root
+            if os.path.isdir(path):
+                if is_excluded(path, root_path, is_dir=True):
+                    continue
+                files = _discover(path, stats)
+            else:
+                if is_excluded(path, root_path):
+                    continue
+                if os.path.splitext(path)[1].lower() not in SUPPORTED_IMAGE_EXTENSIONS:
+                    continue
+                stats.total_files += 1
+                stats.supported_images += 1
+                files = [path]
+            for file_path in files:
+                stats.current_file = file_path
+                _index_safely(conn, root_id, file_path, stats)
+                stats.processed += 1
+                conn.commit()
+
+        for path in vanished:
+            if _root_for(path, roots) is not None:
+                stats.removed_images += _mark_missing_under(conn, path)
+        conn.commit()
+    finally:
+        conn.close()
+    stats.current_file = None
+    return stats
+
+
+def _index_safely(conn, root_id: int, file_path: str, stats: IndexStats) -> bool:
+    """Index one file; False if it vanished meanwhile. Never raises."""
+    try:
+        _index_one(conn, root_id, file_path, stats)
+        return True
+    except FileNotFoundError:
+        return False  # deleted while we were indexing: it will be marked missing
+    except Exception as exc:
+        stats.failed += 1
+        stats.errors.append(f"{file_path}: {type(exc).__name__}: {exc}")
+        return True
+
+
+def _root_for(path: str, roots: list[tuple[int, str]]) -> tuple[int, str] | None:
+    target = os.path.normcase(os.path.abspath(path))
+    best = None
+    for root_id, root_path in roots:
+        prefix = os.path.normcase(os.path.abspath(root_path))
+        if target == prefix or target.startswith(prefix.rstrip(os.sep) + os.sep):
+            if best is None or len(root_path) > len(best[1]):
+                best = (root_id, root_path)
+    return best
+
+
+def _mark_missing_under(conn, path: str) -> int:
+    prefix = path.rstrip("\\/") + os.sep
+    escaped = prefix.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+    cur = conn.execute(
+        "UPDATE files SET status = 'missing' WHERE status != 'missing' "
+        "AND (path = ? OR path LIKE ? ESCAPE '!')",
+        (path, escaped + "%"),
+    )
+    return cur.rowcount
+
+
 def _discover(root_path: str, stats: IndexStats) -> list[str]:
     def on_error(exc: OSError) -> None:
         stats.errors.append(f"{exc.filename}: {exc.strerror}")
 
     images: list[str] = []
-    for dirpath, _dirnames, filenames in os.walk(root_path, onerror=on_error):
+    for dirpath, dirnames, filenames in os.walk(root_path, onerror=on_error):
+        dirnames[:] = [d for d in dirnames if not skip_dir(dirpath, d)]
         for filename in filenames:
             stats.total_files += 1
             if os.path.splitext(filename)[1].lower() in SUPPORTED_IMAGE_EXTENSIONS:

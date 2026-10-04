@@ -44,7 +44,7 @@ def _run_index(path):
 
     response = client.post("/index/start", json={"path": str(path)})
     assert response.status_code == 202
-    jobs.wait(timeout=30)
+    assert jobs.wait_idle(timeout=30)
     return client.get("/index/status").json()
 
 

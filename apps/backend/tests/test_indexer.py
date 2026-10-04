@@ -162,3 +162,84 @@ def test_cancel_stops_early_and_keeps_committed_work(tmp_path):
     assert len(_statuses()) == 2
     stats = index_folder(str(tmp_path))  # resuming processes only the remainder
     assert stats.unchanged_images == 2 and stats.new_images == 3
+
+
+def test_discovery_skips_excluded_folders(tmp_path):
+    make_image(tmp_path / "keep.jpg")
+    for skipped in ["node_modules/pkg", ".git/objects", "AppData/Local"]:
+        (tmp_path / skipped).mkdir(parents=True)
+        make_image(tmp_path / skipped / "icon.png")
+
+    stats = index_folder(str(tmp_path))
+
+    assert stats.supported_images == 1
+    assert _statuses() == {"keep.jpg": "indexed"}
+
+
+def test_file_deleted_during_indexing_is_not_an_error(tmp_path, monkeypatch):
+    import app.indexer
+
+    make_image(tmp_path / "a.jpg")
+    doomed = make_image(tmp_path / "b.jpg", color=(9, 9, 9))
+    real_index_one = app.indexer._index_one
+
+    def delete_then_index(conn, root_id, file_path, stats):
+        if file_path.endswith("b.jpg"):
+            doomed.unlink()
+        return real_index_one(conn, root_id, file_path, stats)
+
+    monkeypatch.setattr(app.indexer, "_index_one", delete_then_index)
+    stats = index_folder(str(tmp_path))
+
+    assert stats.failed == 0
+    assert _statuses() == {"a.jpg": "indexed"}
+
+
+def test_apply_changes_handles_create_modify_delete_and_move(tmp_path):
+    from app.indexer import apply_changes
+
+    keep = make_image(tmp_path / "keep.jpg")
+    gone = make_image(tmp_path / "gone.jpg", color=(1, 1, 1))
+    index_folder(str(tmp_path))
+
+    new = make_image(tmp_path / "new.jpg", color=(2, 2, 2))
+    gone.unlink()
+    (tmp_path / "trip").mkdir()
+    keep.rename(tmp_path / "trip" / "kept.jpg")
+    stats = apply_changes({str(new), str(gone), str(keep), str(tmp_path / "trip" / "kept.jpg")})
+
+    assert stats.new_images == 1
+    assert stats.moved_images == 1
+    assert stats.removed_images == 1
+    assert _statuses() == {"kept.jpg": "indexed", "gone.jpg": "missing", "new.jpg": "indexed"}
+
+
+def test_apply_changes_marks_a_deleted_folder_missing(tmp_path):
+    import shutil
+
+    from app.indexer import apply_changes
+
+    (tmp_path / "trip").mkdir()
+    make_image(tmp_path / "trip" / "a.jpg")
+    make_image(tmp_path / "trip" / "b.jpg", color=(5, 5, 5))
+    make_image(tmp_path / "trip_2.jpg", color=(6, 6, 6))
+    index_folder(str(tmp_path))
+
+    shutil.rmtree(tmp_path / "trip")
+    stats = apply_changes({str(tmp_path / "trip")})
+
+    assert stats.removed_images == 2
+    assert _statuses() == {"a.jpg": "missing", "b.jpg": "missing", "trip_2.jpg": "indexed"}
+
+
+def test_apply_changes_ignores_paths_outside_known_roots(tmp_path):
+    from app.indexer import apply_changes
+
+    (tmp_path / "root").mkdir()
+    index_folder(str(tmp_path / "root"))
+    stray = make_image(tmp_path / "stray.jpg")
+
+    stats = apply_changes({str(stray)})
+
+    assert stats.new_images == 0
+    assert _statuses() == {}

@@ -22,8 +22,8 @@ This repository is being built incrementally, one verified milestone at a time.
 | --- | --- |
 | M1 · Electron + Next.js + FastAPI wired together | done |
 | M2 · Persistent incremental index (SQLite, EXIF, thumbnails, background jobs) | done |
-| M3 · Filesystem watcher | next |
-| M4 · Semantic search core (OpenCLIP + FAISS) | planned |
+| M3 · Filesystem watcher | done |
+| M4 · Semantic search core (OpenCLIP + FAISS) | next |
 | M5 · Search UI | planned |
 | M6 · Map view | planned |
 
@@ -32,6 +32,8 @@ background — dimensions, EXIF date/GPS/camera, and a 320px thumbnail — with
 a live progress bar, Cancel, and Resume. Re-scanning only touches new or
 changed files; moved files keep their record; deleted files are marked
 missing. Corrupt images are recorded and skipped without stopping the job.
+Indexed folders are watched: new, edited, moved, and deleted photos are
+picked up automatically within a couple of seconds, with no Rescan needed.
 
 See [`docs/roadmap-revised.md`](docs/roadmap-revised.md) for the full plan.
 

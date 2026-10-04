@@ -83,9 +83,37 @@ curl http://127.0.0.1:8000/images/1/metadata
 curl -o thumb.jpg http://127.0.0.1:8000/images/1/thumbnail
 ```
 
-Only one indexing job runs at a time (a second `/index/start` returns 409).
+Scans run one at a time; starting a second folder queues it, and starting
+the same folder twice returns 409.
 Re-indexing the same folder is incremental: unchanged files are skipped
 without being read, so it is close to instant.
+
+## Automatic updates (the watcher)
+
+Every folder Cortex has indexed is also *watched* using the operating
+system's change notifications (via `watchdog`), so nothing is polled:
+
+- a new or edited photo is indexed about a second after it is written;
+- a deleted photo (or a deleted folder) is marked missing;
+- a renamed or moved photo keeps its record (it is matched by content hash).
+
+Changes are batched after ~1 second of quiet, so a large copy produces one
+update rather than hundreds. On startup Cortex also re-scans every folder
+once to catch anything that changed while it was closed; this is
+incremental, so unchanged files are not even read.
+
+All writes to the index (scans and watcher updates) go through a single
+background worker, one task at a time (`app/jobs.py`).
+
+### What Cortex skips
+
+So that "Index this computer" (your home folder) doesn't drown in icons and
+caches, Cortex never looks inside: hidden folders (`.git`, `.cache`, ...),
+`AppData`, `node_modules`, `venv`, `__pycache__`, `site-packages`, the
+recycle bin, system folders at a drive root (`C:\Windows`,
+`C:\Program Files`, ...), and its own `storage/` and `models/` folders.
+These rules apply only *below* a folder you chose, never to the folder
+itself (see `app/exclusions.py`).
 
 ## Running the tests
 

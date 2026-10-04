@@ -3,3 +3,10 @@ uvicorn[standard]==0.34.0
 pydantic==2.10.4
 pillow==11.0.0
 watchdog==6.0.0
+numpy==2.5.3
+torch==2.14.1
+torchvision==0.29.1
+open_clip_torch==3.3.0
+# Pinned: Windows Smart App Control blocks the DLLs of faiss-cpu 1.13+
+# (too new to have a reputation yet); 1.12.0 loads. See docs/development.md.
+faiss-cpu==1.12.0

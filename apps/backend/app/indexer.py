@@ -268,6 +268,10 @@ def _index_one(conn, root_id: int, file_path: str, stats: IndexStats) -> None:
             stats.moved_images += 1
             return
 
+    if row:
+        # The content changed, so the old embedding describes a different image.
+        conn.execute("DELETE FROM embeddings WHERE file_id = ?", (row["id"],))
+
     metadata = extract_image_metadata(file_path)
     now = time.time()
     filename = os.path.basename(file_path)

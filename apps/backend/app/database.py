@@ -66,6 +66,15 @@ MIGRATIONS: list[str] = [
     CREATE INDEX idx_files_status ON files(status);
     CREATE INDEX idx_files_hash ON files(content_hash);
     """,
+    """
+    CREATE TABLE embeddings (
+        file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+        model TEXT NOT NULL,
+        vector BLOB NOT NULL,
+        created_at REAL NOT NULL,
+        PRIMARY KEY (file_id, model)
+    );
+    """,
 ]
 
 

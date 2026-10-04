@@ -1,8 +1,21 @@
+import pytest
 from fastapi.testclient import TestClient
 
+import app.main as main
+from app.embedder import get_embedder
+from app.jobs import IndexJobManager
 from app.main import app
+from app.search import SearchService
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def fresh_services(monkeypatch):
+    """Each test gets its own search index and worker, like a fresh app start."""
+    search = SearchService(get_embedder)
+    monkeypatch.setattr(main, "search_service", search)
+    monkeypatch.setattr(main, "jobs", IndexJobManager(search))
 
 
 def test_health_returns_ok():
@@ -40,11 +53,9 @@ def test_scan_endpoint_handles_missing_folder_gracefully():
 
 
 def _run_index(path):
-    from app.main import jobs
-
     response = client.post("/index/start", json={"path": str(path)})
     assert response.status_code == 202
-    assert jobs.wait_idle(timeout=30)
+    assert main.jobs.wait_idle(timeout=30)
     return client.get("/index/status").json()
 
 

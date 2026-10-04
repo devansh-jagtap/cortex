@@ -8,21 +8,25 @@ same machine.
 from __future__ import annotations
 
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.database import get_connection
+from app.embedder import get_embedder
 from app.jobs import IndexJobManager, JobAlreadyRunning
 from app.scanner import scan_folder
+from app.search import SearchService
 from app.storage import thumbnails_dir
 from app.watcher import FolderWatcher
 
-jobs = IndexJobManager()
+search_service = SearchService(get_embedder)
+jobs = IndexJobManager(search_service)
 watcher = FolderWatcher(jobs.submit_changes)
 
 
@@ -44,6 +48,7 @@ async def lifespan(_app: FastAPI):
             # Catch up on anything that changed while Cortex was closed.
             # Incremental, so unchanged files are not even read.
             jobs.start(path)
+    jobs.request_embedding()  # loads existing vectors into the search index
     yield
     watcher.stop()
     jobs.cancel()
@@ -157,6 +162,60 @@ def list_images(
     finally:
         conn.close()
     return {"total": total, "items": [dict(r) for r in rows]}
+
+
+class SearchRequest(BaseModel):
+    query: str = Field(max_length=500)
+    limit: int = Field(60, ge=1, le=300)
+
+    @field_validator("query")
+    @classmethod
+    def query_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("query must not be empty")
+        return value.strip()
+
+
+@app.post("/search")
+def search(request: SearchRequest) -> dict:
+    started = time.perf_counter()
+    if search_service.indexed_vectors() == 0:
+        return {"query": request.query, "results": [], "took_ms": 0, "searched": 0}
+    try:
+        # Over-fetch: a hit can belong to a file that went missing a moment ago.
+        hits = search_service.search(request.query, request.limit * 2)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"The AI model is not available: {exc}")
+
+    scores = dict(hits)
+    rows = []
+    if scores:
+        conn = get_connection()
+        try:
+            marks = ",".join("?" * len(scores))
+            rows = conn.execute(
+                f"SELECT {_IMAGE_COLUMNS} FROM files f JOIN image_metadata m ON m.file_id = f.id "
+                f"WHERE f.status = 'indexed' AND f.id IN ({marks})",
+                tuple(scores),
+            ).fetchall()
+        finally:
+            conn.close()
+    results = sorted(({**dict(r), "score": round(scores[r["id"]], 4)} for r in rows), key=lambda r: -r["score"])
+    return {
+        "query": request.query,
+        "results": results[: request.limit],
+        "took_ms": round((time.perf_counter() - started) * 1000, 1),
+        "searched": search_service.indexed_vectors(),
+    }
+
+
+@app.get("/models/status")
+def models_status() -> dict:
+    return {
+        **search_service.embedder.status(),
+        "vectors": search_service.indexed_vectors(),
+        "pending": search_service.pending_count(),
+    }
 
 
 @app.get("/images/{image_id}/metadata")

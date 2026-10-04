@@ -1,9 +1,10 @@
 """The background indexing worker.
 
 Every write to the index goes through one worker thread, one task at a time:
-full folder scans (started by the user, or the catch-up scan at startup) and
-small batches of changed paths from the filesystem watcher. Running them in
-sequence means a scan and a watcher update can never race each other.
+full folder scans (started by the user, or the catch-up scan at startup),
+small batches of changed paths from the filesystem watcher, and the AI
+embedding pass that follows either of them. Running them in sequence means
+a scan, a watcher update, and the embedder can never race each other.
 
 Scan progress lives in memory for fast polling and is mirrored to the
 `index_jobs` table, so a crash leaves a trace. Resuming is simply scanning
@@ -20,6 +21,7 @@ from dataclasses import dataclass, field
 
 from app.database import get_connection
 from app.indexer import IndexCancelled, IndexStats, apply_changes, index_folder
+from app.search import EmbedProgress, SearchService
 
 log = logging.getLogger("cortex.jobs")
 
@@ -32,14 +34,16 @@ class JobAlreadyRunning(Exception):
 
 @dataclass
 class _Task:
-    kind: str  # "scan" | "changes"
+    kind: str  # "scan" | "changes" | "embed"
     root_path: str | None = None
     job_id: int | None = None
     paths: set[str] = field(default_factory=set)
 
 
 class IndexJobManager:
-    def __init__(self) -> None:
+    def __init__(self, search: SearchService | None = None) -> None:
+        self._search = search
+        self._embedding: dict = {"state": "idle"}
         self._cv = threading.Condition()
         self._queue: deque[_Task] = deque()
         self._current: _Task | None = None
@@ -84,9 +88,19 @@ class IndexJobManager:
             self._ensure_worker()
             self._cv.notify_all()
 
+    def request_embedding(self) -> None:
+        """Queue an embedding pass (also reconciles the vector index)."""
+        if self._search is None:
+            return
+        with self._cv:
+            if not any(t.kind == "embed" for t in self._queue):
+                self._queue.append(_Task("embed"))
+            self._ensure_worker()
+            self._cv.notify_all()
+
     def cancel(self) -> bool:
         with self._cv:
-            if self._current and self._current.kind == "scan":
+            if self._current and self._current.kind in ("scan", "embed"):
                 self._cancel.set()
                 return True
         return False
@@ -107,6 +121,7 @@ class IndexJobManager:
                 "updating": self._current is not None and self._current.kind == "changes",
                 "queued_scans": sum(1 for t in self._queue if t.kind == "scan"),
                 "last_activity_at": self._last_activity_at,
+                "embedding": dict(self._embedding),
             }
         if snapshot is None:
             snapshot = self._last_persisted_job() or {"state": "idle"}
@@ -127,8 +142,9 @@ class IndexJobManager:
                 self._cv.wait_for(lambda: bool(self._queue))
                 task = self._queue.popleft()
                 self._current = task
-                if task.kind == "scan":
+                if task.kind in ("scan", "embed"):
                     self._cancel.clear()
+                if task.kind == "scan":
                     self._snapshot = {
                         "job_id": task.job_id,
                         "state": "running",
@@ -140,9 +156,13 @@ class IndexJobManager:
             try:
                 if task.kind == "scan":
                     self._run_scan(task)
-                else:
+                    self.request_embedding()
+                elif task.kind == "changes":
                     stats = apply_changes(task.paths)
                     log.info("applied %d changed path(s): %s", len(task.paths), stats.to_dict())
+                    self.request_embedding()
+                else:
+                    self._run_embed()
             except Exception:
                 log.exception("index task failed: %s", task.kind)
             finally:
@@ -183,6 +203,23 @@ class IndexJobManager:
             self._snapshot.update(state=state, error=error, finished_at=time.time())
             final = self._snapshot["stats"]
         self._persist(job_id, state, final, error, finished=True)
+
+    def _run_embed(self) -> None:
+        def on_progress(progress: EmbedProgress) -> None:
+            with self._cv:
+                self._embedding = {"state": "running", **progress.to_dict()}
+
+        try:
+            progress = self._search.embed_pending(on_progress, self._cancel.is_set)
+            state = "cancelled" if self._cancel.is_set() else "done"
+            with self._cv:
+                self._embedding = {"state": state, **progress.to_dict()}
+        except Exception as exc:
+            with self._cv:
+                self._embedding = {**self._embedding, "state": "error", "error": f"{type(exc).__name__}: {exc}"}
+            raise
+        finally:
+            self._search.sync()
 
     def _create_job_row(self, root_path: str) -> int:
         conn = get_connection()

@@ -88,6 +88,40 @@ the same folder twice returns 409.
 Re-indexing the same folder is incremental: unchanged files are skipped
 without being read, so it is close to instant.
 
+## AI search (OpenCLIP + FAISS)
+
+Every indexed photo is also turned into a 512-number vector by OpenCLIP
+(ViT-B/32, `laion2b_s34b_b79k`), and so is your search text; the photos
+whose vectors point the most in the same direction are the results.
+
+- **First run downloads the model** (~580 MB) into `models/`. That happens
+  automatically the first time there is a photo to embed; `GET
+  /models/status` reports `downloading` / `loading` / `ready`.
+- Embedding runs in the background after every scan or watcher update, on
+  the CPU, using half the cores so the computer stays usable: about 10
+  photos/second on the development laptop. It uses the 320px thumbnails
+  (CLIP only looks at 224px), so originals are not decoded twice.
+- Vectors are stored in SQLite (`embeddings` table, the source of truth);
+  the FAISS index lives in memory and is rebuilt/reconciled from SQLite.
+
+```bash
+curl -X POST http://127.0.0.1:8000/search -H "Content-Type: application/json"   -d "{\"query\": \"dogs at the beach\", \"limit\": 20}"
+curl http://127.0.0.1:8000/models/status
+```
+
+**GPU (optional).** The default install is the CPU build of PyTorch. With
+an NVIDIA GPU, the CUDA build is roughly 10x faster: use the pip command
+from the "Get Started" selector on pytorch.org (Windows, pip, your CUDA
+version), keeping `torch==2.14.1` / `torchvision==0.29.1`, and run it with
+`./venv/Scripts/python.exe -m pip`. Cortex picks the GPU automatically when
+PyTorch can see one.
+
+**Windows Smart App Control.** If you see `DLL load failed ... An
+Application Control policy has blocked this file`, Windows is refusing an
+unsigned native library that is too new to have a reputation. `faiss-cpu`
+is pinned to 1.12.0 for this reason; don't upgrade it without checking that
+`python -c "import faiss"` still works.
+
 ## Automatic updates (the watcher)
 
 Every folder Cortex has indexed is also *watched* using the operating
@@ -126,7 +160,13 @@ cd apps/backend
 Tests never touch the real `storage/` folder: `tests/conftest.py` points
 `CORTEX_STORAGE_DIR` at a fresh temporary directory for every test, and the
 test images are generated on the fly (`tests/images.py`), including real
-EXIF dates and GPS tags.
+EXIF dates and GPS tags. Search tests use a tiny fake embedder
+(`tests/fakes.py`) that places images by colour, so ranking is tested
+without the 580 MB model. One test uses the real model; run it with:
+
+```bash
+CORTEX_SLOW_TESTS=1 ./venv/Scripts/python.exe -m pytest -q -k real_clip
+```
 
 ## Storage locations
 

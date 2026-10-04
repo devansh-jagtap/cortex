@@ -244,9 +244,14 @@ Pillow stage is the right upgrade, not a broker.
 
 On backend start:
 1. Open SQLite, run pending schema migrations.
-2. Load each `storage/vectors/<space>.faiss` if present.
-3. Compare FAISS `ntotal` and id set against `embeddings` for that space.
-   If they differ, **rebuild FAISS from the BLOBs** and overwrite the file.
+2. Build the in-memory FAISS index from the `embeddings` BLOBs. *As built
+   (M4):* rather than persisting a `.faiss` file and comparing it with
+   SQLite, the index is simply rebuilt from SQLite at startup and then
+   reconciled after every change (by file id + embedding timestamp). Nothing
+   can drift because there is no second copy on disk. Measured cost: 428
+   vectors load instantly; at ~100k vectors this is ~200 MB of reads, which
+   we will measure before adding a persisted file.
+3. *(Folded into step 2.)*
 4. Any `index_jobs` left in `running` are marked `interrupted`; the UI
    offers "Resume", which is simply "run the job again" — everything
    already `indexed` is skipped by §3.3.
@@ -314,7 +319,13 @@ quality. ViT-L/14 or SigLIP are better but 3–5× heavier — they are an
 ### 6.2 Managing models
 
 - Weights are cached under `models/` (we point OpenCLIP's cache there) so
-  they are downloaded once and never committed.
+  they are downloaded once and never committed. *As built:* 578 MB, about
+  two minutes on the first run; override the location with
+  `CORTEX_MODELS_DIR`.
+- *Windows Smart App Control:* on machines where it is enforced, it refuses
+  to load native DLLs that are too new to have a reputation. `faiss-cpu`
+  1.13+ is blocked on the development machine; 1.12.0 loads and is pinned.
+  PyTorch, NumPy and OpenCLIP load normally.
 - `GET /models/status` reports `{downloaded, loaded, device}` so the UI can
   show a first-run "Downloading model (600 MB)…" state honestly instead of
   a spinner that hangs.

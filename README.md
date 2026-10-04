@@ -23,8 +23,8 @@ This repository is being built incrementally, one verified milestone at a time.
 | M1 · Electron + Next.js + FastAPI wired together | done |
 | M2 · Persistent incremental index (SQLite, EXIF, thumbnails, background jobs) | done |
 | M3 · Filesystem watcher | done |
-| M4 · Semantic search core (OpenCLIP + FAISS) | next |
-| M5 · Search UI | planned |
+| M4 · Semantic search core (OpenCLIP + FAISS) | done (API) |
+| M5 · Search UI | next |
 | M6 · Map view | planned |
 
 What works today: add a folder and Cortex catalogs every photo in it in the
@@ -34,13 +34,15 @@ changed files; moved files keep their record; deleted files are marked
 missing. Corrupt images are recorded and skipped without stopping the job.
 Indexed folders are watched: new, edited, moved, and deleted photos are
 picked up automatically within a couple of seconds, with no Rescan needed.
+Every photo is embedded locally with OpenCLIP, and `POST /search` finds
+photos by meaning ("a privacy settings menu") in about 120 ms.
 
 See [`docs/roadmap-revised.md`](docs/roadmap-revised.md) for the full plan.
 
 ## Stack
 
 Electron · Next.js (React, TypeScript, Tailwind CSS) · Python · FastAPI ·
-OpenCLIP (planned) · FAISS (planned) · SQLite (planned)
+OpenCLIP · FAISS · SQLite · watchdog
 
 ## Quick start
 

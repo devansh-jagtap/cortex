@@ -200,6 +200,10 @@ class SearchService:
         vector = self.embedder.embed_text(query)
         return self._vector_index().search(vector, limit)
 
+    def similar(self, vector: np.ndarray, limit: int) -> list[tuple[int, float]]:
+        """Photos whose image vectors are closest to `vector` (itself included)."""
+        return self._vector_index().search(vector, limit)
+
 
 _PENDING = """
     FROM files f JOIN image_metadata m ON m.file_id = f.id

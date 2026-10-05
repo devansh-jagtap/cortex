@@ -420,7 +420,7 @@ def image_metadata(image_id: int) -> dict:
 
 
 _ENTITY_COUNT_SQL = """
-    SELECT e.id, e.type, e.name, e.data, COUNT(f.id) AS photos, MAX(f.id) AS cover
+    SELECT e.id, e.type, e.name, e.data, COUNT(f.id) AS photos
     FROM entities e
     JOIN file_entities fe ON fe.entity_id = e.id
     JOIN files f ON f.id = fe.file_id AND f.status = 'indexed'
@@ -444,55 +444,109 @@ def list_entities(
     return {"items": [{**_entity_summary(r), "photos": r["photos"]} for r in rows]}
 
 
-@app.get("/graph")
-def graph_view(
-    limit: int = Query(150, ge=1, le=600),
-    focus: int | None = Query(None, description="Return this entity's neighbourhood instead"),
-) -> dict:
-    """The slice of the knowledge graph the Galaxy view draws.
+# Two photos are linked when they look alike. Measured with ViT-B/32 on a real
+# library: unrelated photos score ~0.30, the top 5% of pairs above 0.68, and
+# near-duplicates 0.86+. So: link to the closest few at >= 0.70, and always
+# to the single closest one at >= 0.55, so a photo joins its group unless it
+# is unlike anything else (then it floats alone, its own little galaxy).
+_STRONG_LINK = 0.70
+_WEAK_LINK = 0.55
+_NEIGHBOURS = 4
 
-    Without `focus`: the `limit` entities with the most photos. With it: that
-    entity and its strongest neighbours, so the view can grow progressively
-    instead of drawing everything at once.
+
+@app.get("/graph/photos")
+def photo_graph(
+    limit: int = Query(400, ge=1, le=1000),
+    focus: int | None = Query(None, description="This photo and the most similar photos in the library"),
+) -> dict:
+    """The Galaxy: photos as nodes, joined when they look alike.
+
+    Without `focus`: the newest `limit` photos. With it: one photo and its
+    nearest look-alikes from the whole library, so the view can grow around
+    whatever the user is exploring instead of drawing everything at once.
     """
+    model = search_service.embedder.name
     conn = get_connection()
     try:
-        rows = conn.execute(
-            f"{_ENTITY_COUNT_SQL} GROUP BY e.id ORDER BY photos DESC, e.name"
-        ).fetchall()
-        by_id = {r["id"]: r for r in rows}
-        if focus is not None:
-            if focus not in by_id:
-                raise HTTPException(status_code=404, detail="Not found")
-            neighbours = conn.execute(
-                """
-                SELECT CASE WHEN source_id = ? THEN target_id ELSE source_id END AS other, MAX(weight) AS w
-                FROM entity_relations WHERE source_id = ? OR target_id = ?
-                GROUP BY other ORDER BY w DESC LIMIT ?
-                """,
-                (focus, focus, focus, limit),
+        columns = "f.id, f.filename, m.width, m.height, e.vector"
+        joins = (
+            "FROM files f JOIN image_metadata m ON m.file_id = f.id "
+            "JOIN embeddings e ON e.file_id = f.id AND e.model = ? WHERE f.status = 'indexed'"
+        )
+        total = conn.execute(f"SELECT COUNT(*) {joins}", (model,)).fetchone()[0]
+        if focus is None:
+            rows = conn.execute(
+                f"SELECT {columns} {joins} ORDER BY COALESCE(m.captured_at, f.mtime_ns / 1e9) DESC, f.id DESC LIMIT ?",
+                (model, limit),
             ).fetchall()
-            ids = [focus] + [n["other"] for n in neighbours if n["other"] in by_id]
         else:
-            ids = [r["id"] for r in rows[:limit]]
-        marks = ",".join("?" * len(ids)) or "NULL"
-        edges = conn.execute(
-            f"SELECT source_id, target_id, kind, weight FROM entity_relations "
-            f"WHERE source_id IN ({marks}) AND target_id IN ({marks})",
-            (*ids, *ids),
-        ).fetchall()
+            seed = conn.execute(
+                "SELECT vector FROM embeddings WHERE file_id = ? AND model = ?", (focus, model)
+            ).fetchone()
+            if seed is None:
+                raise HTTPException(status_code=404, detail="Photo not found")
+            hits = search_service.similar(np.frombuffer(seed["vector"], dtype=np.float32), 13)
+            ids = list(dict.fromkeys([focus] + [i for i, _ in hits]))
+            rows = conn.execute(
+                f"SELECT {columns} {joins} AND f.id IN ({','.join('?' * len(ids))})", (model, *ids)
+            ).fetchall()
+            rows.sort(key=lambda r: ids.index(r["id"]))
+        if not rows:
+            return {"nodes": [], "edges": [], "clusters": [], "total": total}
+
+        vectors = np.stack([np.frombuffer(r["vector"], dtype=np.float32) for r in rows])
+        similarity = vectors @ vectors.T
+        np.fill_diagonal(similarity, -1.0)
+        links: dict[tuple[int, int], float] = {}
+        for i in range(len(rows)):
+            for rank, j in enumerate(np.argsort(-similarity[i])[:_NEIGHBOURS]):
+                s = float(similarity[i, j])
+                if s >= _STRONG_LINK or (rank == 0 and s >= _WEAK_LINK):
+                    links[(min(i, int(j)), max(i, int(j)))] = s
+
+        # Groups = connected components, named after their most common scene.
+        parent = list(range(len(rows)))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        for a, b in links:
+            parent[find(a)] = find(b)
+        ids = [r["id"] for r in rows]
+        scenes = {}
+        for chunk_start in range(0, len(ids), 900):
+            chunk = ids[chunk_start : chunk_start + 900]
+            for r in conn.execute(
+                "SELECT fe.file_id, e.name FROM file_entities fe JOIN entities e ON e.id = fe.entity_id "
+                f"WHERE e.type = 'scene' AND fe.file_id IN ({','.join('?' * len(chunk))}) ORDER BY fe.score",
+                chunk,
+            ):
+                scenes[r["file_id"]] = r["name"]
     finally:
         conn.close()
+
+    members: dict[int, list[int]] = {}
+    for i in range(len(rows)):
+        members.setdefault(find(i), []).append(i)
+    clusters, cluster_of = [], {}
+    for n, (_, group) in enumerate(sorted(members.items(), key=lambda kv: -len(kv[1]))):
+        names = [scenes[ids[i]] for i in group if ids[i] in scenes]
+        top = max(set(names), key=names.count) if names else None
+        label = top if top and len(group) >= 2 and names.count(top) * 2 >= len(group) else None
+        clusters.append({"id": n, "size": len(group), "label": label})
+        for i in group:
+            cluster_of[i] = n
     return {
         "nodes": [
-            {**_entity_summary(by_id[i]), "photos": by_id[i]["photos"], "cover": by_id[i]["cover"]}
-            for i in ids
+            {"id": r["id"], "filename": r["filename"], "width": r["width"], "height": r["height"], "cluster": cluster_of[i]}
+            for i, r in enumerate(rows)
         ],
-        "edges": [
-            {"source": e["source_id"], "target": e["target_id"], "kind": e["kind"], "weight": e["weight"]}
-            for e in edges
-        ],
-        "total": len(rows),
+        "edges": [{"source": ids[a], "target": ids[b], "similarity": round(s, 4)} for (a, b), s in links.items()],
+        "clusters": clusters,
+        "total": total,
     }
 
 

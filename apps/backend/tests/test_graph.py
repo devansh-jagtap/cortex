@@ -253,41 +253,6 @@ def test_search_understands_place_names(tmp_path, services, colour_scenes):
     assert blue_in_goa["results"][0]["filename"] == "goa_blue.jpg"
 
 
-def test_graph_endpoint_returns_top_entities_and_their_edges(tmp_path, services, colour_scenes):
-    for i in range(3):
-        make_image(tmp_path / f"goa{i}.jpg", gps=GOA, color=RED)
-    make_image(tmp_path / "paris.jpg", gps=PARIS, color=BLUE)
-    _index_via_api(tmp_path)
-
-    body = client.get("/graph").json()
-
-    nodes = {n["name"]: n for n in body["nodes"]}
-    assert {"Goa", "India", "Panaji", "Red", "Paris", "France"} <= set(nodes)
-    assert nodes["Goa"]["photos"] == 3 and nodes["Goa"]["cover"] is not None
-    ids = {n["id"] for n in body["nodes"]}
-    assert all(e["source"] in ids and e["target"] in ids for e in body["edges"])
-    name_of = {n["id"]: n["name"] for n in body["nodes"]}
-    assert ("part_of", "Goa", "India") in {(e["kind"], name_of[e["source"]], name_of[e["target"]]) for e in body["edges"]}
-
-    assert len(client.get("/graph?limit=2").json()["nodes"]) == 2
-
-
-def test_graph_focus_returns_a_neighbourhood(tmp_path, services, colour_scenes):
-    for i in range(2):
-        make_image(tmp_path / f"goa{i}.jpg", gps=GOA, color=RED)
-    make_image(tmp_path / "paris.jpg", gps=PARIS, color=BLUE)
-    _index_via_api(tmp_path)
-    goa = next(e for e in client.get("/entities?type=place").json()["items"] if e["name"] == "Goa")
-
-    body = client.get(f"/graph?focus={goa['id']}").json()
-
-    names = [n["name"] for n in body["nodes"]]
-    assert names[0] == "Goa"
-    assert {"India", "Panaji", "Red"} <= set(names)
-    assert "Paris" not in names
-    assert client.get("/graph?focus=999999").status_code == 404
-
-
 def test_removed_folder_leaves_no_places_behind(tmp_path, services, colour_scenes):
     goa, paris = tmp_path / "goa", tmp_path / "paris"
     goa.mkdir()
@@ -301,7 +266,47 @@ def test_removed_folder_leaves_no_places_behind(tmp_path, services, colour_scene
     client.delete(f"/roots/{paris_root}")
     assert main.jobs.wait_idle(timeout=60)
 
-    names = {n["name"] for n in client.get("/graph").json()["nodes"]}
+    names = {e["name"] for e in client.get("/entities").json()["items"]}
     assert "Goa" in names
     assert not names & {"Paris", "France", "Île-de-France", "Blue"}
     assert _entities("place").keys() == {"Panaji", "Goa", "India"}
+
+
+def test_photo_network_links_look_alikes_into_separate_named_groups(tmp_path, services, colour_scenes):
+    for i in range(3):
+        make_image(tmp_path / f"red{i}.jpg", color=(200 + i * 10, 20 + i * 5, 20))
+        make_image(tmp_path / f"blue{i}.jpg", color=(20, 20 + i * 5, 200 + i * 10))
+    _index_via_api(tmp_path)
+
+    body = client.get("/graph/photos").json()
+
+    assert body["total"] == 6 and len(body["nodes"]) == 6
+    group_of = {n["filename"]: n["cluster"] for n in body["nodes"]}
+    assert len({group_of[f"red{i}.jpg"] for i in range(3)}) == 1
+    assert len({group_of[f"blue{i}.jpg"] for i in range(3)}) == 1
+    assert group_of["red0.jpg"] != group_of["blue0.jpg"]
+    labels = {c["label"] for c in body["clusters"]}
+    assert labels == {"Red", "Blue"}
+    name_of = {n["id"]: n["filename"] for n in body["nodes"]}
+    for edge in body["edges"]:  # no link ever crosses between the groups
+        assert name_of[edge["source"]][:3] == name_of[edge["target"]][:3]
+        assert edge["similarity"] >= 0.55
+
+
+def test_photo_network_focus_brings_the_closest_look_alikes(tmp_path, services, colour_scenes):
+    for i in range(3):
+        make_image(tmp_path / f"red{i}.jpg", color=(200 + i * 10, 20, 20))
+    make_image(tmp_path / "blue.jpg", color=(20, 20, 220))
+    _index_via_api(tmp_path)
+    red0 = next(n["id"] for n in client.get("/graph/photos").json()["nodes"] if n["filename"] == "red0.jpg")
+
+    body = client.get(f"/graph/photos?focus={red0}").json()
+
+    names = [n["filename"] for n in body["nodes"]]
+    assert names[0] == "red0.jpg"
+    assert set(names[:3]) == {"red0.jpg", "red1.jpg", "red2.jpg"}
+    assert client.get("/graph/photos?focus=999999").status_code == 404
+
+
+def test_photo_network_is_empty_before_anything_is_analyzed(services):
+    assert client.get("/graph/photos").json() == {"nodes": [], "edges": [], "clusters": [], "total": 0}

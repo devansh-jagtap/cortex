@@ -7,7 +7,9 @@ same machine.
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -15,10 +17,12 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+import numpy as np
 from pydantic import BaseModel, Field, field_validator
 
 from app.database import get_connection
 from app.embedder import get_embedder
+from app.graph import GraphBuilder
 from app.jobs import IndexJobManager, JobAlreadyRunning
 from app.scanner import scan_folder
 from app.search import SearchService
@@ -26,7 +30,7 @@ from app.storage import thumbnails_dir
 from app.watcher import FolderWatcher
 
 search_service = SearchService(get_embedder)
-jobs = IndexJobManager(search_service)
+jobs = IndexJobManager(search_service, GraphBuilder(get_embedder))
 watcher = FolderWatcher(jobs.submit_changes)
 
 
@@ -186,9 +190,18 @@ def map_points() -> dict:
     """Every indexed photo with a location, as GeoJSON for the map to cluster."""
     conn = get_connection()
     try:
+        # Each point carries its most specific place name, so a clicked cluster
+        # can say where it is ("Panjim, Goa") without another request.
         rows = conn.execute(
-            "SELECT f.id, m.latitude, m.longitude FROM files f JOIN image_metadata m ON m.file_id = f.id "
-            "WHERE f.status = 'indexed' AND m.latitude IS NOT NULL AND m.longitude IS NOT NULL"
+            """
+            SELECT f.id, m.latitude, m.longitude,
+                   (SELECT group_concat(name, ', ') FROM (
+                        SELECT e.name FROM file_entities fe JOIN entities e ON e.id = fe.entity_id
+                        WHERE fe.file_id = f.id AND e.type = 'place' AND e.key NOT LIKE 'country:%'
+                        ORDER BY CASE WHEN e.key LIKE 'city:%' THEN 0 ELSE 1 END)) AS place
+            FROM files f JOIN image_metadata m ON m.file_id = f.id
+            WHERE f.status = 'indexed' AND m.latitude IS NOT NULL AND m.longitude IS NOT NULL
+            """
         ).fetchall()
     finally:
         conn.close()
@@ -198,7 +211,8 @@ def map_points() -> dict:
             {
                 "type": "Feature",
                 "geometry": {"type": "Point", "coordinates": [r["longitude"], r["latitude"]]},
-                "properties": {"id": r["id"]},
+                # "Delhi, Delhi" (city and region share a name) reads as "Delhi".
+                "properties": {"id": r["id"], "place": ", ".join(dict.fromkeys((r["place"] or "").split(", "))) or None},
             }
             for r in rows
         ],
@@ -217,9 +231,91 @@ class SearchRequest(BaseModel):
         return value.strip()
 
 
+# Words that carry no visual meaning once a place has been recognised:
+# "photos from Goa" is just "Goa".
+_FILLER = {
+    "photo", "photos", "picture", "pictures", "pic", "pics", "image", "images", "from",
+    "in", "at", "of", "taken", "my", "the", "near", "around", "show", "me", "all", "trip", "a",
+}
+_WORD = re.compile(r"[\w']+")
+
+
+def _find_place(conn, query: str):
+    """The longest known place name in the query, and what's left of it."""
+    words = _WORD.findall(query.lower())
+    best = None
+    for entity in conn.execute("SELECT id, name FROM entities WHERE type = 'place'"):
+        name = _WORD.findall(entity["name"].lower())
+        for i in range(len(words) - len(name) + 1):
+            if name and words[i : i + len(name)] == name and (best is None or len(name) > len(best[1])):
+                best = (entity, name, i)
+    if best is None:
+        return None, query
+    entity, name, i = best
+    rest = [w for w in words[:i] + words[i + len(name) :] if w not in _FILLER]
+    return entity, " ".join(rest)
+
+
+def _place_search(conn, place, residual: str, limit: int) -> tuple[list[dict], int]:
+    ids = [
+        r[0]
+        for r in conn.execute(
+            "SELECT fe.file_id FROM file_entities fe JOIN files f ON f.id = fe.file_id "
+            "WHERE fe.entity_id = ? AND f.status = 'indexed'",
+            (place["id"],),
+        )
+    ]
+    searched = len(ids)
+    scores: dict[int, float] = {}
+    if residual and ids:
+        query_vector = search_service.embedder.embed_text(residual)
+        for start in range(0, len(ids), 900):
+            chunk = ids[start : start + 900]
+            for r in conn.execute(
+                f"SELECT file_id, vector FROM embeddings WHERE model = ? AND file_id IN ({','.join('?' * len(chunk))})",
+                (search_service.embedder.name, *chunk),
+            ):
+                scores[r["file_id"]] = float(np.frombuffer(r["vector"], dtype=np.float32) @ query_vector)
+        ids = sorted(scores, key=lambda i: -scores[i])
+    ids = ids[:limit]
+    if not ids:
+        return [], searched
+    rows = conn.execute(
+        f"SELECT {_IMAGE_COLUMNS} FROM files f JOIN image_metadata m ON m.file_id = f.id "
+        f"WHERE f.id IN ({','.join('?' * len(ids))}) "
+        "ORDER BY COALESCE(m.captured_at, f.mtime_ns / 1e9) DESC",
+        ids,
+    ).fetchall()
+    items = [dict(r) for r in rows]
+    if scores:
+        for item in items:
+            item["score"] = round(scores.get(item["id"], 0.0), 4)
+        items.sort(key=lambda item: -item["score"])
+    return items, searched
+
+
 @app.post("/search")
 def search(request: SearchRequest) -> dict:
     started = time.perf_counter()
+    conn = get_connection()
+    try:
+        place, residual = _find_place(conn, request.query)
+        if place is not None:
+            try:
+                results, searched = _place_search(conn, place, residual, request.limit)
+            except Exception as exc:
+                raise HTTPException(status_code=503, detail=f"The AI model is not available: {exc}")
+            return {
+                "query": request.query,
+                "place": {"id": place["id"], "name": place["name"]},
+                "refined_by": residual or None,
+                "results": results,
+                "took_ms": round((time.perf_counter() - started) * 1000, 1),
+                "searched": searched,
+            }
+    finally:
+        conn.close()
+
     if search_service.indexed_vectors() == 0:
         return {"query": request.query, "results": [], "took_ms": 0, "searched": 0}
     try:
@@ -259,6 +355,11 @@ def models_status() -> dict:
     }
 
 
+def _entity_summary(row) -> dict:
+    data = json.loads(row["data"] or "{}")
+    return {"id": row["id"], "type": row["type"], "name": row["name"], "level": data.get("level"), "data": data}
+
+
 @app.get("/images/{image_id}/metadata")
 def image_metadata(image_id: int) -> dict:
     conn = get_connection()
@@ -268,11 +369,81 @@ def image_metadata(image_id: int) -> dict:
             "WHERE f.id = ? AND f.status = 'indexed'",
             (image_id,),
         ).fetchone()
+        entities = conn.execute(
+            """
+            SELECT e.id, e.type, e.name, e.data FROM file_entities fe JOIN entities e ON e.id = fe.entity_id
+            WHERE fe.file_id = ?
+            ORDER BY CASE e.type WHEN 'place' THEN 0 WHEN 'event' THEN 1 ELSE 2 END, fe.score DESC
+            """,
+            (image_id,),
+        ).fetchall()
     finally:
         conn.close()
     if not row:
         raise HTTPException(status_code=404, detail="Image not found")
-    return dict(row)
+    return {**dict(row), "entities": [_entity_summary(e) for e in entities]}
+
+
+_ENTITY_COUNT_SQL = """
+    SELECT e.id, e.type, e.name, e.data, COUNT(f.id) AS photos
+    FROM entities e
+    JOIN file_entities fe ON fe.entity_id = e.id
+    JOIN files f ON f.id = fe.file_id AND f.status = 'indexed'
+"""
+
+
+@app.get("/entities")
+def list_entities(
+    type: str | None = Query(None, pattern="^(place|scene|event|person)$"),
+    limit: int = Query(200, ge=1, le=2000),
+) -> dict:
+    conn = get_connection()
+    try:
+        where = "WHERE e.type = ?" if type else ""
+        rows = conn.execute(
+            f"{_ENTITY_COUNT_SQL} {where} GROUP BY e.id ORDER BY photos DESC, e.name LIMIT ?",
+            (*([type] if type else []), limit),
+        ).fetchall()
+    finally:
+        conn.close()
+    return {"items": [{**_entity_summary(r), "photos": r["photos"]} for r in rows]}
+
+
+@app.get("/entities/{entity_id}")
+def entity_detail(entity_id: int, limit: int = Query(200, ge=1, le=500)) -> dict:
+    conn = get_connection()
+    try:
+        row = conn.execute(f"{_ENTITY_COUNT_SQL} WHERE e.id = ? GROUP BY e.id", (entity_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Not found")
+        photos = conn.execute(
+            f"""
+            SELECT {_IMAGE_COLUMNS} FROM file_entities fe
+            JOIN files f ON f.id = fe.file_id AND f.status = 'indexed'
+            JOIN image_metadata m ON m.file_id = f.id
+            WHERE fe.entity_id = ?
+            ORDER BY COALESCE(m.captured_at, f.mtime_ns / 1e9) DESC
+            LIMIT ?
+            """,
+            (entity_id, limit),
+        ).fetchall()
+        related = conn.execute(
+            """
+            SELECT e.id, e.type, e.name, e.data, r.kind, r.weight FROM entity_relations r
+            JOIN entities e ON e.id = CASE WHEN r.source_id = ? THEN r.target_id ELSE r.source_id END
+            WHERE r.source_id = ? OR r.target_id = ?
+            ORDER BY r.weight DESC LIMIT 40
+            """,
+            (entity_id, entity_id, entity_id),
+        ).fetchall()
+    finally:
+        conn.close()
+    return {
+        **_entity_summary(row),
+        "photos_total": row["photos"],
+        "photos": [dict(p) for p in photos],
+        "related": [{**_entity_summary(r), "kind": r["kind"], "weight": r["weight"]} for r in related],
+    }
 
 
 _MEDIA_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}

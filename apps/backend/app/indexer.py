@@ -269,8 +269,10 @@ def _index_one(conn, root_id: int, file_path: str, stats: IndexStats) -> None:
             return
 
     if row:
-        # The content changed, so the old embedding describes a different image.
+        # The content changed, so the old embedding, labels and place describe
+        # a different image.
         conn.execute("DELETE FROM embeddings WHERE file_id = ?", (row["id"],))
+        conn.execute("DELETE FROM enrichment WHERE file_id = ?", (row["id"],))
 
     metadata = extract_image_metadata(file_path)
     now = time.time()

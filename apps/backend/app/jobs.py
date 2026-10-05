@@ -20,6 +20,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from app.database import get_connection
+from app.graph import GraphBuilder
 from app.indexer import IndexCancelled, IndexStats, apply_changes, index_folder
 from app.search import EmbedProgress, SearchService
 
@@ -34,16 +35,18 @@ class JobAlreadyRunning(Exception):
 
 @dataclass
 class _Task:
-    kind: str  # "scan" | "changes" | "embed"
+    kind: str  # "scan" | "changes" | "embed" | "graph"
     root_path: str | None = None
     job_id: int | None = None
     paths: set[str] = field(default_factory=set)
 
 
 class IndexJobManager:
-    def __init__(self, search: SearchService | None = None) -> None:
+    def __init__(self, search: SearchService | None = None, graph: GraphBuilder | None = None) -> None:
         self._search = search
+        self._graph = graph
         self._embedding: dict = {"state": "idle"}
+        self._organizing: dict = {"state": "idle"}
         self._warmed = False
         self._cv = threading.Condition()
         self._queue: deque[_Task] = deque()
@@ -99,9 +102,19 @@ class IndexJobManager:
             self._ensure_worker()
             self._cv.notify_all()
 
+    def request_graph(self) -> None:
+        """Queue a pass that brings places, scenes, events and relations up to date."""
+        if self._graph is None:
+            return
+        with self._cv:
+            if not any(t.kind == "graph" for t in self._queue):
+                self._queue.append(_Task("graph"))
+            self._ensure_worker()
+            self._cv.notify_all()
+
     def cancel(self) -> bool:
         with self._cv:
-            if self._current and self._current.kind in ("scan", "embed"):
+            if self._current and self._current.kind in ("scan", "embed", "graph"):
                 self._cancel.set()
                 return True
         return False
@@ -123,6 +136,7 @@ class IndexJobManager:
                 "queued_scans": sum(1 for t in self._queue if t.kind == "scan"),
                 "last_activity_at": self._last_activity_at,
                 "embedding": dict(self._embedding),
+                "organizing": dict(self._organizing),
             }
         if snapshot is None:
             snapshot = self._last_persisted_job() or {"state": "idle"}
@@ -143,7 +157,7 @@ class IndexJobManager:
                 self._cv.wait_for(lambda: bool(self._queue))
                 task = self._queue.popleft()
                 self._current = task
-                if task.kind in ("scan", "embed"):
+                if task.kind in ("scan", "embed", "graph"):
                     self._cancel.clear()
                 if task.kind == "scan":
                     self._snapshot = {
@@ -162,8 +176,11 @@ class IndexJobManager:
                     stats = apply_changes(task.paths)
                     log.info("applied %d changed path(s): %s", len(task.paths), stats.to_dict())
                     self.request_embedding()
-                else:
+                elif task.kind == "embed":
                     self._run_embed()
+                    self.request_graph()
+                else:
+                    self._run_graph()
             except Exception:
                 log.exception("index task failed: %s", task.kind)
             finally:
@@ -229,6 +246,19 @@ class IndexJobManager:
                 self._warmed = True
             except Exception:
                 log.exception("could not load the AI model")
+
+    def _run_graph(self) -> None:
+        with self._cv:
+            self._organizing = {"state": "running"}
+        stats = self._graph.run(self._cancel.is_set)
+        with self._cv:
+            self._organizing = {
+                "state": "error" if stats.errors else "done",
+                "events": stats.events,
+                "relations": stats.relations,
+                "errors": stats.errors,
+            }
+        log.info("graph updated: %s", stats)
 
     def _create_job_row(self, root_path: str) -> int:
         conn = get_connection()

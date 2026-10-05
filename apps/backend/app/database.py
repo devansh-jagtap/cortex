@@ -75,6 +75,41 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (file_id, model)
     );
     """,
+    """
+    CREATE TABLE entities (
+        id INTEGER PRIMARY KEY,
+        type TEXT NOT NULL,
+        key TEXT NOT NULL,
+        name TEXT NOT NULL,
+        data TEXT,
+        UNIQUE (type, key)
+    );
+
+    CREATE TABLE file_entities (
+        file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+        entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        score REAL,
+        source TEXT NOT NULL,
+        PRIMARY KEY (file_id, entity_id)
+    );
+    CREATE INDEX idx_file_entities_entity ON file_entities(entity_id);
+
+    CREATE TABLE entity_relations (
+        source_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        target_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        weight REAL NOT NULL DEFAULT 1,
+        PRIMARY KEY (source_id, target_id, kind)
+    );
+    CREATE INDEX idx_entity_relations_target ON entity_relations(target_id);
+
+    CREATE TABLE enrichment (
+        file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+        pipeline TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        PRIMARY KEY (file_id, pipeline)
+    );
+    """,
 ]
 
 

@@ -17,6 +17,7 @@ import {
   getIndexStatus,
   getLibrary,
   getSuggestedRoots,
+  removeFolder,
   searchPhotos,
   startIndexing,
   type EntityDetail,
@@ -189,6 +190,25 @@ export default function Home() {
     }
   }
 
+  async function handleRemoveFolder(root: { id: number; path: string }) {
+    const ok = window.confirm(
+      `Remove ${root.path} from Cortex?
+
+Its photos leave your Cortex library and searches. The folder and the photos in it stay exactly where they are.`,
+    );
+    if (!ok) return;
+    setNotice(null);
+    try {
+      await removeFolder(root.id);
+      setEntity(null);
+      setResults(null);
+      lastQuery.current = "";
+      setQuery("");
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Couldn't remove that folder.");
+    }
+  }
+
   async function handleLoadMore() {
     const page = await getImages(PAGE_SIZE, photos.length);
     setPhotos((prev) => [...prev, ...page.items]);
@@ -267,6 +287,7 @@ export default function Home() {
             onAddFolder={handleAddFolder}
             onIndexComputer={handleIndexComputer}
             onScan={beginIndexing}
+            onRemove={handleRemoveFolder}
             onCancel={() => void cancelIndexing()}
           />
         </div>

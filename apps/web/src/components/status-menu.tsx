@@ -66,10 +66,21 @@ interface StatusMenuProps {
   onAddFolder: () => void;
   onIndexComputer: () => void;
   onScan: (path: string) => void;
+  onRemove: (root: { id: number; path: string }) => void;
   onCancel: () => void;
 }
 
-export function StatusMenu({ status, online, library, hasBridge, onAddFolder, onIndexComputer, onScan, onCancel }: StatusMenuProps) {
+export function StatusMenu({
+  status,
+  online,
+  library,
+  hasBridge,
+  onAddFolder,
+  onIndexComputer,
+  onScan,
+  onRemove,
+  onCancel,
+}: StatusMenuProps) {
   const summary = summarise(status, online);
   const stats = status.stats;
   const scanning = status.state === "running";
@@ -149,6 +160,15 @@ export function StatusMenu({ status, online, library, hasBridge, onAddFolder, on
                   onClick={() => onScan(root.path)}
                 >
                   Rescan
+                </Button>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  className="text-muted-foreground hover:text-destructive"
+                  disabled={scanning && stats?.root_path === root.path}
+                  onClick={() => onRemove(root)}
+                >
+                  Remove
                 </Button>
               </li>
             ))}

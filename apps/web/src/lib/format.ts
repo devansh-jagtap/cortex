@@ -1,5 +1,5 @@
 export function baseName(path: string) {
-  return path.split(/[\/]/).filter(Boolean).pop() ?? path;
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
 export function formatBytes(bytes: number) {

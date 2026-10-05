@@ -146,6 +146,8 @@ export const getLibrary = () => request<Library>("/library");
 
 export const getSuggestedRoots = () => request<{ home: string }>("/roots/suggested");
 
+export const removeFolder = (rootId: number) => request<{ removing: string }>(`/roots/${rootId}`, { method: "DELETE" });
+
 export const getImages = (limit: number, offset: number) =>
   request<ImagePage>(`/images?limit=${limit}&offset=${offset}`);
 

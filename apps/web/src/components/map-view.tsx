@@ -24,6 +24,16 @@ interface Place {
   count: number;
   lng: number;
   lat: number;
+  name: string | null;
+}
+
+/** "Panjim, Goa", or the two most common places when a cluster spans more. */
+function placeName(names: (string | null | undefined)[]): string | null {
+  const counts = new globalThis.Map<string, number>();
+  for (const name of names) if (name) counts.set(name, (counts.get(name) ?? 0) + 1);
+  const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([name]) => name);
+  if (top.length === 0) return null;
+  return top.length === 1 ? top[0] : `${top[0]} and ${top.length === 2 ? top[1] : "nearby"}`;
 }
 
 export default function MapView({ onOpen }: { onOpen: (items: ImageItem[], index: number) => void }) {
@@ -73,9 +83,9 @@ export default function MapView({ onOpen }: { onOpen: (items: ImageItem[], index
     const markers = new globalThis.Map<number, Marker>();
     let onScreen = new globalThis.Map<number, Marker>();
 
-    async function showPlace(ids: number[], count: number, lng: number, lat: number) {
+    async function showPlace(ids: number[], names: (string | null)[], count: number, lng: number, lat: number) {
       const page = await getImagesByIds(ids);
-      if (!cancelled) setPlace({ items: page.items, count, lng, lat });
+      if (!cancelled) setPlace({ items: page.items, count, lng, lat, name: placeName(names) });
     }
 
     function updateClusterMarkers() {
@@ -100,7 +110,13 @@ export default function MapView({ onOpen }: { onOpen: (items: ImageItem[], index
             e.stopPropagation();
             const source = map.getSource<GeoJSONSource>("photos");
             const leaves = await source!.getClusterLeaves(clusterId, MAX_LEAVES, 0);
-            void showPlace(leaves.map((f) => f.properties!.id as number), count, lng, lat);
+            void showPlace(
+              leaves.map((f) => f.properties!.id as number),
+              leaves.map((f) => f.properties!.place as string | null),
+              count,
+              lng,
+              lat,
+            );
           });
           marker = new Marker({ element: el }).setLngLat([lng, lat]);
           markers.set(clusterId, marker);
@@ -139,7 +155,7 @@ export default function MapView({ onOpen }: { onOpen: (items: ImageItem[], index
         const feature = e.features?.[0];
         if (!feature || feature.geometry.type !== "Point") return;
         const [lng, lat] = feature.geometry.coordinates as [number, number];
-        void showPlace([feature.properties.id as number], 1, lng, lat);
+        void showPlace([feature.properties.id as number], [feature.properties.place as string | null], 1, lng, lat);
       });
       map.on("mouseenter", "photo-points", () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", "photo-points", () => (map.getCanvas().style.cursor = ""));
@@ -183,8 +199,11 @@ export default function MapView({ onOpen }: { onOpen: (items: ImageItem[], index
         <aside className="absolute top-4 right-4 bottom-4 flex w-[340px] max-w-[calc(100%-2rem)] flex-col overflow-hidden rounded-xl bg-card/95 ring-1 ring-border backdrop-blur animate-in fade-in-0 slide-in-from-right-4 duration-200">
           <div className="flex items-start justify-between gap-3 border-b border-border p-4">
             <div>
-              <p className="font-serif text-2xl leading-tight">{plural(place.count, "photo")}</p>
-              <p className="mt-1 text-xs text-muted-foreground">near {formatCoordinates(place.lat, place.lng)}</p>
+              <p className="font-serif text-2xl leading-tight">{place.name ?? plural(place.count, "photo")}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {place.name ? `${plural(place.count, "photo")}, near ` : "near "}
+                {formatCoordinates(place.lat, place.lng)}
+              </p>
             </div>
             <Button variant="ghost" size="icon-sm" aria-label="Close" onClick={() => setPlace(null)}>
               <XIcon />

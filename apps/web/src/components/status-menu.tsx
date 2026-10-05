@@ -35,6 +35,7 @@ export function summarise(status: IndexStatus, online: boolean | null): Summary 
     };
   }
   if (status.updating) return { tone: "busy", text: "Updating changes" };
+  if (status.organizing?.state === "running") return { tone: "busy", text: "Organizing by place and scene" };
   if (["interrupted", "cancelled", "failed"].includes(status.state)) return { tone: "warn", text: "Indexing stopped" };
   if (embedding?.state === "error" || status.model?.state === "error") return { tone: "warn", text: "AI model unavailable" };
   const watching = status.watching ?? 0;

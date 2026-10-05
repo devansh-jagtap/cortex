@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { ChevronLeftIcon, ChevronRightIcon, XIcon } from "lucide-react";
 
+import { EntityChip } from "@/components/entity";
 import { Button } from "@/components/ui/button";
 import { DialogDescription, DialogOverlay, DialogPortal, DialogTitle } from "@/components/ui/dialog";
-import { originalUrl, thumbnailUrl, type ImageItem } from "@/lib/backend";
+import { getImageDetail, originalUrl, thumbnailUrl, type EntitySummary, type ImageItem } from "@/lib/backend";
 import { formatBytes, formatCoordinates, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -15,13 +16,37 @@ interface PhotoViewerProps {
   index: number | null;
   hasBridge: boolean;
   onIndexChange: (index: number | null) => void;
+  onOpenEntity: (id: number) => void;
 }
 
-export function PhotoViewer({ items, index, hasBridge, onIndexChange }: PhotoViewerProps) {
+/** City and region (a country only if nothing finer is known), then event, then scenes. */
+function chipsFor(entities: EntitySummary[]): EntitySummary[] {
+  const places = entities.filter((e) => e.type === "place");
+  const finer = places.filter((e) => e.level !== "country");
+  const shown = (finer.length ? finer : places).filter(
+    (e, i, list) => list.findIndex((other) => other.name === e.name) === i,
+  );
+  return [...shown, ...entities.filter((e) => e.type !== "place")];
+}
+
+export function PhotoViewer({ items, index, hasBridge, onIndexChange, onOpenEntity }: PhotoViewerProps) {
   const item = index !== null ? items[index] : undefined;
+  const itemId = item?.id;
   const [loadedId, setLoadedId] = useState<number | null>(null);
   const [failedId, setFailedId] = useState<number | null>(null);
   const [actionError, setActionError] = useState<{ id: number; message: string } | null>(null);
+  const [entities, setEntities] = useState<{ id: number; list: EntitySummary[] } | null>(null);
+
+  useEffect(() => {
+    if (itemId === undefined) return;
+    let cancelled = false;
+    getImageDetail(itemId)
+      .then((detail) => !cancelled && setEntities({ id: itemId, list: chipsFor(detail.entities) }))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [itemId]);
 
   const go = (delta: number) => {
     if (index === null) return;
@@ -112,6 +137,14 @@ export function PhotoViewer({ items, index, hasBridge, onIndexChange }: PhotoVie
                   </Fact>
                 )}
               </dl>
+
+              {entities?.id === item.id && entities.list.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {entities.list.map((entity) => (
+                    <EntityChip key={entity.id} entity={entity} onOpen={onOpenEntity} />
+                  ))}
+                </div>
+              )}
 
               <div className="mt-auto flex flex-col gap-2">
                 <Button

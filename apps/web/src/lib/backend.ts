@@ -34,6 +34,7 @@ export interface IndexStatus {
   watching?: number;
   embedding?: EmbeddingStatus;
   model?: ModelStatus;
+  organizing?: { state: "idle" | "running" | "done" | "error"; errors?: string[] };
 }
 
 export interface EmbeddingStatus {
@@ -71,7 +72,8 @@ export interface ImageItem {
 }
 
 export interface SearchResult extends ImageItem {
-  score: number;
+  /** Absent when results are simply everything in a place, newest first. */
+  score?: number;
 }
 
 export interface SearchResponse {
@@ -79,6 +81,30 @@ export interface SearchResponse {
   results: SearchResult[];
   took_ms: number;
   searched: number;
+  /** Set when the query named a known place; results are limited to it. */
+  place?: { id: number; name: string };
+  /** What was left of the query after the place, used to rank within it. */
+  refined_by?: string | null;
+}
+
+export type EntityType = "place" | "scene" | "event" | "person";
+
+export interface EntitySummary {
+  id: number;
+  type: EntityType;
+  name: string;
+  level: "city" | "region" | "country" | null;
+  data: { region?: string; country?: string; start?: number; end?: number; trip?: boolean };
+}
+
+export interface EntityDetail extends EntitySummary {
+  photos_total: number;
+  photos: ImageItem[];
+  related: (EntitySummary & { kind: string; weight: number })[];
+}
+
+export interface ImageDetail extends ImageItem {
+  entities: EntitySummary[];
 }
 
 export interface ImagePage {
@@ -127,10 +153,18 @@ export const getImagesByIds = (ids: number[]) => request<ImagePage>(`/images?lim
 
 export interface MapPoints {
   type: "FeatureCollection";
-  features: { type: "Feature"; geometry: { type: "Point"; coordinates: [number, number] }; properties: { id: number } }[];
+  features: {
+    type: "Feature";
+    geometry: { type: "Point"; coordinates: [number, number] };
+    properties: { id: number; place: string | null };
+  }[];
 }
 
 export const getMapPoints = () => request<MapPoints>("/map/points");
+
+export const getImageDetail = (id: number) => request<ImageDetail>(`/images/${id}/metadata`);
+
+export const getEntity = (id: number) => request<EntityDetail>(`/entities/${id}`);
 
 export const searchPhotos = (query: string, limit: number, signal?: AbortSignal) =>
   request<SearchResponse>("/search", {

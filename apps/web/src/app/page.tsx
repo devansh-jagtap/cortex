@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 
+import { EntityHeader } from "@/components/entity";
 import { PhotoGrid, type PhotoGridHandle } from "@/components/photo-grid";
 import { PhotoViewer } from "@/components/photo-viewer";
 import { SearchField } from "@/components/search-field";
@@ -11,12 +12,14 @@ import { Button } from "@/components/ui/button";
 import {
   cancelIndexing,
   checkBackendHealth,
+  getEntity,
   getImages,
   getIndexStatus,
   getLibrary,
   getSuggestedRoots,
   searchPhotos,
   startIndexing,
+  type EntityDetail,
   type ImageItem,
   type IndexStatus,
   type Library,
@@ -56,6 +59,7 @@ export default function Home() {
   const [viewer, setViewer] = useState<{ items: ImageItem[]; index: number } | null>(null);
   const [view, setView] = useState<View>("search");
   const [expandedQuery, setExpandedQuery] = useState<string | null>(null);
+  const [entity, setEntity] = useState<EntityDetail | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const gridRef = useRef<PhotoGridHandle>(null);
@@ -190,11 +194,40 @@ export default function Home() {
     setPhotoTotal(page.total);
   }
 
-  const best = results?.results[0]?.score ?? 0;
-  const closeCount = results ? results.results.filter((r) => r.score >= best - CLOSE_TO_BEST).length : 0;
+  /** Show one place, scene, or event: its photos and what it connects to. */
+  async function openEntity(id: number) {
+    try {
+      const detail = await getEntity(id);
+      searchAbort.current?.abort();
+      lastQuery.current = "";
+      setQuery("");
+      setResults(null);
+      setViewer(null);
+      setView("search");
+      setEntity(detail);
+      window.scrollTo({ top: 0 });
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Couldn't open that.");
+    }
+  }
+
+  // Results limited to a place without extra words carry no score: they are
+  // all relevant, newest first, so none are held back behind "Show more".
+  const best = results?.results[0]?.score;
+  const closeCount = !results
+    ? 0
+    : best === undefined
+      ? results.results.length
+      : results.results.filter((r) => (r.score ?? 0) >= best - CLOSE_TO_BEST).length;
   const expanded = results !== null && expandedQuery === results.query;
-  const items: ImageItem[] = results ? (expanded ? results.results : results.results.slice(0, closeCount)) : photos;
-  const weak = results !== null && results.results.length > 0 && best < WEAK_BEST_SCORE;
+  const items: ImageItem[] = entity
+    ? entity.photos
+    : results
+      ? expanded
+        ? results.results
+        : results.results.slice(0, closeCount)
+      : photos;
+  const weak = results !== null && !results.place && best !== undefined && best < WEAK_BEST_SCORE;
   const hasLibrary = library !== null && library.roots.length > 0;
   const progress = progressOf(status);
   const analyzing = status.embedding?.state === "running";
@@ -262,28 +295,54 @@ export default function Home() {
 
         {hasLibrary && (
           <>
-            <section className={cn("transition-[padding] duration-300", results ? "pt-8 pb-6" : "pt-[11vh] pb-10")}>
+            <section
+              className={cn("transition-[padding] duration-300", results || entity ? "pt-8 pb-6" : "pt-[11vh] pb-10")}
+            >
               <SearchField
                 ref={inputRef}
                 value={query}
-                compact={!!results}
+                compact={!!results || !!entity}
                 searching={searching}
-                onChange={setQuery}
+                onChange={(value) => {
+                  setEntity(null);
+                  setQuery(value);
+                }}
                 onSubmit={() => {
                   lastQuery.current = "";
                   void runSearch(query);
                 }}
                 onPickExample={(example) => {
+                  setEntity(null);
                   setQuery(example);
                   void runSearch(example);
                 }}
                 onLeaveDown={() => gridRef.current?.focusFirst()}
               />
+              {entity ? (
+                <div className="mt-7">
+                  <EntityHeader entity={entity} onOpen={openEntity} onClose={() => setEntity(null)} />
+                </div>
+              ) : (
               <p className="mt-5 text-sm text-muted-foreground" aria-live="polite">
                 {searchError ? (
                   <span className="text-destructive">Search didn&apos;t work: {searchError}</span>
                 ) : searching && status.model?.state !== "ready" ? (
                   "Loading the AI model. The first search after Cortex starts takes a few seconds."
+                ) : results?.place ? (
+                  <>
+                    <span className="text-foreground/90">
+                      {plural(results.refined_by ? items.length : results.searched, "photo")} in{" "}
+                      <button
+                        type="button"
+                        onClick={() => openEntity(results.place!.id)}
+                        className="underline decoration-star/60 underline-offset-4 hover:decoration-star focus-visible:outline-2 focus-visible:outline-star"
+                      >
+                        {results.place.name}
+                      </button>
+                      {results.refined_by && ` closest to “${results.refined_by}”`}
+                    </span>
+                    <span className="ml-2 tabular-nums">{results.took_ms} ms</span>
+                  </>
                 ) : results ? (
                   results.searched === 0 ? (
                     "Search starts working once Cortex has analyzed your photos."
@@ -307,11 +366,12 @@ export default function Home() {
                   </>
                 )}
               </p>
+              )}
             </section>
 
             {items.length > 0 && (
               <PhotoGrid
-                revealKey={results ? `search:${results.query}` : "library"}
+                revealKey={entity ? `entity:${entity.id}` : results ? `search:${results.query}` : "library"}
                 ref={gridRef}
                 items={items}
                 onOpen={(index) => setViewer({ items, index })}
@@ -319,13 +379,19 @@ export default function Home() {
               />
             )}
 
-            {results && !expanded && results.results.length > items.length && (
+            {entity && entity.photos_total > entity.photos.length && (
+              <p className="mt-8 self-center text-sm text-muted-foreground">
+                Showing the latest {entity.photos.length.toLocaleString()} of {entity.photos_total.toLocaleString()}.
+              </p>
+            )}
+
+            {!entity && results && !expanded && results.results.length > items.length && (
               <Button variant="outline" className="mt-8 self-center" onClick={() => setExpandedQuery(results.query)}>
                 Show {(results.results.length - items.length).toLocaleString()} more
               </Button>
             )}
 
-            {!results && photos.length < photoTotal && (
+            {!results && !entity && photos.length < photoTotal && (
               <Button variant="outline" className="mt-8 self-center" onClick={handleLoadMore}>
                 Show {Math.min(PAGE_SIZE, photoTotal - photos.length).toLocaleString()} more
               </Button>
@@ -339,6 +405,7 @@ export default function Home() {
         index={viewer?.index ?? null}
         hasBridge={hasBridge}
         onIndexChange={(index) => setViewer((v) => (index === null || !v ? null : { ...v, index }))}
+        onOpenEntity={openEntity}
       />
     </div>
   );

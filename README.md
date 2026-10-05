@@ -27,8 +27,8 @@ This repository is being built incrementally, one verified milestone at a time.
 | M5 · Search UI | done |
 | M6 · Map view | done |
 | M7 · Knowledge graph foundation (places, scenes, events) | done |
-| M8 · Galaxy view of the graph | next |
-| M9 · Robustness and performance | planned |
+| M8 · Galaxy view of the graph | done |
+| M9 · Robustness and performance | next |
 | M10 · Packaging (installer) | planned |
 
 What works today: add a folder and Cortex catalogs every photo in it in the
@@ -47,6 +47,8 @@ The Map tab shows every photo that recorded a location, clustered by place.
 Cortex also works out where each photo was taken, what's in it, and which
 event or trip it belongs to, and links them: click "Goa" to see its photos
 and everything connected to it. Searches like "photos from Goa" just work.
+The Galaxy tab draws all of it as constellations: places, events, and
+scenes as stars, related ones joined, unrelated groups floating apart.
 
 See [`docs/roadmap-revised.md`](docs/roadmap-revised.md) for the full plan.
 

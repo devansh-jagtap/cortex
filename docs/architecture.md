@@ -496,6 +496,15 @@ embedding, or storage.
   photos. MapLibre's worker can't be found by the bundler, so
   `apps/web/scripts/copy-maplibre-worker.mjs` serves it from
   `public/maplibre/` (run automatically before `dev` and `build`).
+- **Galaxy** (M8): `GET /graph?limit=150` returns the entities with the
+  most photos plus the relations among them; `GET /graph?focus=<id>`
+  returns one entity's strongest neighbours, which the view merges in
+  ("Expand"), so it grows progressively instead of drawing everything at
+  once. Layout is d3-force run synchronously (400 ticks) before the first
+  paint, so stars appear settled. Each connected group is pulled toward
+  its own anchor on a golden-angle spiral (biggest groups nearest the
+  centre): unrelated groups read as separate galaxies. Rendered as SVG,
+  which is plenty for a few hundred stars; canvas is the upgrade path.
 
 ---
 

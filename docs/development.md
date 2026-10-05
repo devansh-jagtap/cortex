@@ -90,6 +90,13 @@ npm run dev:web       # Next.js dev server only, from repo root
   a place ("beach in Goa", "photos from Mumbai") are limited to that place.
   Place names come from GeoNames (about 6 MB, downloaded once into
   `models/geonames/` the first time a photo has a location).
+- **Galaxy**: everything Cortex knows, drawn as constellations. Each star
+  is a place, event, or scene, sized by how many photos it has; lines
+  join things that belong together (a city and its region) or share
+  photos. Groups with nothing in common float apart. Click a star to see
+  its photos and light up its neighbours, *Expand* to bring in what's
+  connected to it, *Show all photos* to open it in Search. Scroll to zoom,
+  drag to pan.
 - **Library panel** (click the status in the top-right corner): the
   folders Cortex watches, Rescan, Add folder, Index this computer, and
   Cancel / Resume for a running or stopped scan.

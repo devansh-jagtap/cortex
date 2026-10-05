@@ -385,7 +385,7 @@ def image_metadata(image_id: int) -> dict:
 
 
 _ENTITY_COUNT_SQL = """
-    SELECT e.id, e.type, e.name, e.data, COUNT(f.id) AS photos
+    SELECT e.id, e.type, e.name, e.data, COUNT(f.id) AS photos, MAX(f.id) AS cover
     FROM entities e
     JOIN file_entities fe ON fe.entity_id = e.id
     JOIN files f ON f.id = fe.file_id AND f.status = 'indexed'
@@ -407,6 +407,58 @@ def list_entities(
     finally:
         conn.close()
     return {"items": [{**_entity_summary(r), "photos": r["photos"]} for r in rows]}
+
+
+@app.get("/graph")
+def graph_view(
+    limit: int = Query(150, ge=1, le=600),
+    focus: int | None = Query(None, description="Return this entity's neighbourhood instead"),
+) -> dict:
+    """The slice of the knowledge graph the Galaxy view draws.
+
+    Without `focus`: the `limit` entities with the most photos. With it: that
+    entity and its strongest neighbours, so the view can grow progressively
+    instead of drawing everything at once.
+    """
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            f"{_ENTITY_COUNT_SQL} GROUP BY e.id ORDER BY photos DESC, e.name"
+        ).fetchall()
+        by_id = {r["id"]: r for r in rows}
+        if focus is not None:
+            if focus not in by_id:
+                raise HTTPException(status_code=404, detail="Not found")
+            neighbours = conn.execute(
+                """
+                SELECT CASE WHEN source_id = ? THEN target_id ELSE source_id END AS other, MAX(weight) AS w
+                FROM entity_relations WHERE source_id = ? OR target_id = ?
+                GROUP BY other ORDER BY w DESC LIMIT ?
+                """,
+                (focus, focus, focus, limit),
+            ).fetchall()
+            ids = [focus] + [n["other"] for n in neighbours if n["other"] in by_id]
+        else:
+            ids = [r["id"] for r in rows[:limit]]
+        marks = ",".join("?" * len(ids)) or "NULL"
+        edges = conn.execute(
+            f"SELECT source_id, target_id, kind, weight FROM entity_relations "
+            f"WHERE source_id IN ({marks}) AND target_id IN ({marks})",
+            (*ids, *ids),
+        ).fetchall()
+    finally:
+        conn.close()
+    return {
+        "nodes": [
+            {**_entity_summary(by_id[i]), "photos": by_id[i]["photos"], "cover": by_id[i]["cover"]}
+            for i in ids
+        ],
+        "edges": [
+            {"source": e["source_id"], "target": e["target_id"], "kind": e["kind"], "weight": e["weight"]}
+            for e in edges
+        ],
+        "total": len(rows),
+    }
 
 
 @app.get("/entities/{entity_id}")

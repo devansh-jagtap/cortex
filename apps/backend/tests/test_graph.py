@@ -251,3 +251,38 @@ def test_search_understands_place_names(tmp_path, services, colour_scenes):
     blue_in_goa = client.post("/search", json={"query": "blue in goa"}).json()
     assert blue_in_goa["refined_by"] == "blue"
     assert blue_in_goa["results"][0]["filename"] == "goa_blue.jpg"
+
+
+def test_graph_endpoint_returns_top_entities_and_their_edges(tmp_path, services, colour_scenes):
+    for i in range(3):
+        make_image(tmp_path / f"goa{i}.jpg", gps=GOA, color=RED)
+    make_image(tmp_path / "paris.jpg", gps=PARIS, color=BLUE)
+    _index_via_api(tmp_path)
+
+    body = client.get("/graph").json()
+
+    nodes = {n["name"]: n for n in body["nodes"]}
+    assert {"Goa", "India", "Panaji", "Red", "Paris", "France"} <= set(nodes)
+    assert nodes["Goa"]["photos"] == 3 and nodes["Goa"]["cover"] is not None
+    ids = {n["id"] for n in body["nodes"]}
+    assert all(e["source"] in ids and e["target"] in ids for e in body["edges"])
+    name_of = {n["id"]: n["name"] for n in body["nodes"]}
+    assert ("part_of", "Goa", "India") in {(e["kind"], name_of[e["source"]], name_of[e["target"]]) for e in body["edges"]}
+
+    assert len(client.get("/graph?limit=2").json()["nodes"]) == 2
+
+
+def test_graph_focus_returns_a_neighbourhood(tmp_path, services, colour_scenes):
+    for i in range(2):
+        make_image(tmp_path / f"goa{i}.jpg", gps=GOA, color=RED)
+    make_image(tmp_path / "paris.jpg", gps=PARIS, color=BLUE)
+    _index_via_api(tmp_path)
+    goa = next(e for e in client.get("/entities?type=place").json()["items"] if e["name"] == "Goa")
+
+    body = client.get(f"/graph?focus={goa['id']}").json()
+
+    names = [n["name"] for n in body["nodes"]]
+    assert names[0] == "Goa"
+    assert {"India", "Panaji", "Red"} <= set(names)
+    assert "Paris" not in names
+    assert client.get("/graph?focus=999999").status_code == 404

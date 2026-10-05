@@ -5,9 +5,9 @@
   "scripts": {
     "dev:backend": ".\\apps\\backend\\venv\\Scripts\\python.exe -m uvicorn app.main:app --app-dir apps/backend --host 127.0.0.1 --port 8000",
     "dev:web": "npm run dev --prefix apps/web",
-    "dev:electron": "npm run build --prefix apps/desktop && npx --prefix apps/desktop electron apps/desktop",
-    "dev:app": "powershell -ExecutionPolicy Bypass -File scripts/dev-app.ps1",
-    "dev": "concurrently -n backend,web -c blue,green \"npm:dev:backend\" \"npm:dev:web\""
+    "dev:electron": "npm run build --prefix apps/desktop && npx --prefix apps/desktop electron apps/desktop --dev",
+    "dev": "concurrently -n backend,web -c blue,green \"npm:dev:backend\" \"npm:dev:web\"",
+    "app": "npm run build --prefix apps/web && npm run app --prefix apps/desktop"
   },
   "keywords": [],
   "author": "",

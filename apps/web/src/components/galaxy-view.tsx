@@ -270,7 +270,7 @@ export default function GalaxyView({ onShowPhotos }: { onShowPhotos: (entityId: 
                 x2={t.x}
                 y2={t.y}
                 stroke={lit ? "var(--star)" : "var(--foreground)"}
-                strokeOpacity={lit ? 0.6 : neighbours ? 0.04 : 0.1 + Math.min(0.15, Math.log1p(l.weight) * 0.03)}
+                strokeOpacity={lit ? 0.6 : selected ? 0.04 : 0.1 + Math.min(0.15, Math.log1p(l.weight) * 0.03)}
                 strokeWidth={(lit ? 1.4 : 1) / Math.sqrt(view.k)}
                 strokeDasharray={l.kind === "part_of" ? "3 3" : undefined}
               />
@@ -278,7 +278,8 @@ export default function GalaxyView({ onShowPhotos }: { onShowPhotos: (entityId: 
           })}
 
           {laidOut.stars.map((s) => {
-            const dim = neighbours !== null && !neighbours.has(s.id);
+            // Only a deliberate click dims the rest; hovering just lights up connections.
+            const dim = selected !== null && neighbours !== null && !neighbours.has(s.id);
             const active = s.id === selected?.id;
             // Small galaxies name every star; big ones name the large stars and whatever is in focus.
             const showLabel = laidOut.stars.length <= 60 || s.r >= 12 || neighbours?.has(s.id) || view.k > 1.6;

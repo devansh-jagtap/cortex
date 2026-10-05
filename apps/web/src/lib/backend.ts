@@ -1,4 +1,9 @@
-export const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://127.0.0.1:8000";
+// In the desktop app the engine's address comes from Electron, which starts
+// it on a free port each launch; in a plain browser it's the dev default.
+export const BACKEND_URL =
+  (typeof window !== "undefined" && window.cortex?.backendUrl) ||
+  process.env.NEXT_PUBLIC_BACKEND_URL ||
+  "http://127.0.0.1:8000";
 
 export type JobState = "idle" | "running" | "done" | "failed" | "cancelled" | "interrupted";
 

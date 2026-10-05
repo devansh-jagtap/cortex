@@ -5,7 +5,8 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p electron/tsconfig.json",
-    "start": "npm run build && electron ."
+    "start": "npm run build && electron . --dev",
+    "app": "npm run build && electron ."
   },
   "keywords": [],
   "author": "",

@@ -27,7 +27,7 @@ This repository is being built incrementally, one verified milestone at a time.
 | M5 · Search UI | done |
 | M6 · Map view | done |
 | M7 · Knowledge graph foundation (places, scenes, events) | done |
-| M8 · Galaxy view of the graph | done |
+| M8 · Galaxy: a network of look-alike photos | done |
 | M9 · Robustness and performance | done |
 | M10 · Packaging | one-command app done; installer waits on code signing |
 
@@ -47,8 +47,9 @@ The Map tab shows every photo that recorded a location, clustered by place.
 Cortex also works out where each photo was taken, what's in it, and which
 event or trip it belongs to, and links them: click "Goa" to see its photos
 and everything connected to it. Searches like "photos from Goa" just work.
-The Galaxy tab draws all of it as constellations: places, events, and
-scenes as stars, related ones joined, unrelated groups floating apart.
+The Galaxy tab draws your photos as a network: every photo is a star,
+joined to the photos that look like it, so similar photos gather into
+groups (named after what's in them) and unrelated ones float apart.
 
 See [`docs/roadmap-revised.md`](docs/roadmap-revised.md) for the full plan.
 

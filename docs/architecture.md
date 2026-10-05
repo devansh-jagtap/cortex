@@ -516,15 +516,22 @@ embedding, or storage.
   photos. MapLibre's worker can't be found by the bundler, so
   `apps/web/scripts/copy-maplibre-worker.mjs` serves it from
   `public/maplibre/` (run automatically before `dev` and `build`).
-- **Galaxy** (M8): `GET /graph?limit=150` returns the entities with the
-  most photos plus the relations among them; `GET /graph?focus=<id>`
-  returns one entity's strongest neighbours, which the view merges in
-  ("Expand"), so it grows progressively instead of drawing everything at
-  once. Layout is d3-force run synchronously (400 ticks) before the first
-  paint, so stars appear settled. Each connected group is pulled toward
-  its own anchor on a golden-angle spiral (biggest groups nearest the
-  centre): unrelated groups read as separate galaxies. Rendered as SVG,
-  which is plenty for a few hundred stars; canvas is the upgrade path.
+- **Galaxy** (M8, revised): a network of *photos*, not of entities.
+  `GET /graph/photos?limit=400` returns the newest photos and links each
+  to its most similar ones by CLIP image vectors: to its closest four at
+  similarity >= 0.70, and always to its single closest one at >= 0.55, so
+  a photo joins its group unless it's unlike everything. Measured on a
+  real library: unrelated photos ~0.30, top 5% of pairs > 0.68,
+  near-duplicates 0.86+. Groups are the connected components, labelled
+  with the scene most of their photos share. `?focus=<id>` returns one
+  photo and its 12 nearest look-alikes from the whole library (FAISS),
+  which the view merges in ("Show more like this"), so it grows around
+  what you explore instead of drawing everything at once. Layout is
+  d3-force run synchronously before the first paint; each group is
+  pulled toward its own anchor on a golden-angle spiral, so unrelated
+  groups float apart. Photos are drawn as round thumbnails sized by how
+  many are shown. The entity graph (places, scenes, events) stays in the
+  API for photo tags and entity pages.
 
 ---
 

@@ -430,6 +430,41 @@ SQLite answers 1–2 hop questions ("everything connected to Goa Trip") in
 milliseconds at this scale. We would only consider a graph engine if
 multi-hop traversal became a hot path — it will not for a personal archive.
 
+*As built (M7)* — `app/graph.py`, run by the worker after every embedding
+pass; all of it is derived data that can be rebuilt from the index.
+
+- **Tables:** `entities (type, key, name, data)`, `file_entities (file,
+  entity, score, source)`, `entity_relations (source, target, kind,
+  weight)`, plus `enrichment (file, pipeline, version)` so each step only
+  handles photos it hasn't seen (bumping a version reprocesses everything;
+  a changed photo is reprocessed automatically).
+- **Places:** GeoNames `cities5000` (every place with 5,000+ people, CC BY
+  4.0, ~6 MB downloaded once into `models/geonames/`) in a 3-D FAISS index on
+  the unit sphere. Naming rule, tuned on real coordinates: skip city
+  sections (`PPLX`, e.g. Dharavi), and among places within 25 km pick the
+  highest population / (1 + km/5)², so Panaji's suburbs say "Panjim" (not
+  the village next door, and not a bigger town 12 km away). Each photo is
+  linked to its city, region and country, chained by `part_of`.
+- **Scenes** (the "topics" above): CLIP zero-shot over ~85 everyday labels,
+  computed from the stored vectors (no photo is re-read). A label needs
+  both ≥ 0.2 probability and ≥ 0.26 similarity: on real photos correct
+  labels scored 0.29–0.31 and wrong guesses ≤ 0.25. Limitation: one strong
+  subject can mask another ("Dog" scores 0.31 on a dog on a beach, "Beach"
+  only 0.20), so scenes describe the main subject; full-sentence search
+  still finds "dogs at the beach".
+- **Events:** sessions split on an 8-hour gap or a 100 km jump; consecutive
+  sessions in the same region, away from home, within 48 h and 21 days
+  merge into a trip ("Goa trip, March 2024"). *Home* is the region with
+  the most distinct days of photos, not the most photos (a two-day trip
+  can out-shoot two weeks at home). Events need 5+ photos with a capture
+  date (screenshots have none).
+- **Relations:** `part_of` (places), `took_place_in` (event → place), and
+  `appears_with` between things that share 2+ photos, weighted by count.
+- **Search:** a query naming a known place ("beach in Goa") is limited to
+  that place and ranked by the rest of the words; "photos from Goa" is
+  everything there, newest first.
+- **People:** not built. It needs a face model and must be opt-in.
+
 ---
 
 ## 9. How the visual views consume the data

@@ -26,8 +26,8 @@ This repository is being built incrementally, one verified milestone at a time.
 | M4 · Semantic search core (OpenCLIP + FAISS) | done |
 | M5 · Search UI | done |
 | M6 · Map view | done |
-| M7 · Knowledge graph foundation (places, scenes, events) | next |
-| M8 · Galaxy view of the graph | planned |
+| M7 · Knowledge graph foundation (places, scenes, events) | done |
+| M8 · Galaxy view of the graph | next |
 | M9 · Robustness and performance | planned |
 | M10 · Packaging (installer) | planned |
 
@@ -44,6 +44,9 @@ keyboard-driven: type a description, arrow into the results, open a photo
 to see where it lives and when it was taken, and open the original in your
 default viewer.
 The Map tab shows every photo that recorded a location, clustered by place.
+Cortex also works out where each photo was taken, what's in it, and which
+event or trip it belongs to, and links them: click "Goa" to see its photos
+and everything connected to it. Searches like "photos from Goa" just work.
 
 See [`docs/roadmap-revised.md`](docs/roadmap-revised.md) for the full plan.
 
@@ -71,3 +74,10 @@ cd apps/desktop
 npm install
 npm run start
 ```
+
+## Credits
+
+- Place names: [GeoNames](https://www.geonames.org), licensed under
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- Map tiles: © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors.
+- Image model: [OpenCLIP](https://github.com/mlfoundations/open_clip) ViT-B/32 trained on LAION-2B.

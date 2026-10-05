@@ -82,6 +82,14 @@ npm run dev:web       # Next.js dev server only, from repo root
   that uses the internet**: it downloads map tiles from OpenStreetMap for
   the areas you look at. No photo, path, or location from your library is
   sent; OpenStreetMap only sees which map squares you view.
+- **Places, scenes, and events**: Cortex works out where each photo was
+  taken (city, region, country), what's in it (beach, food, code,
+  dog...), and groups photos into events and trips. They appear as chips
+  in the viewer; click one to see everything connected to it, then keep
+  clicking through related places, events, and scenes. Searches that name
+  a place ("beach in Goa", "photos from Mumbai") are limited to that place.
+  Place names come from GeoNames (about 6 MB, downloaded once into
+  `models/geonames/` the first time a photo has a location).
 - **Library panel** (click the status in the top-right corner): the
   folders Cortex watches, Rescan, Add folder, Index this computer, and
   Cancel / Resume for a running or stopped scan.

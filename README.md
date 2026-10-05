@@ -29,7 +29,7 @@ This repository is being built incrementally, one verified milestone at a time.
 | M7 · Knowledge graph foundation (places, scenes, events) | done |
 | M8 · Galaxy view of the graph | done |
 | M9 · Robustness and performance | done |
-| M10 · Packaging (installer) | next |
+| M10 · Packaging | one-command app done; installer waits on code signing |
 
 What works today: add a folder and Cortex catalogs every photo in it in the
 background — dimensions, EXIF date/GPS/camera, and a 320px thumbnail — with
@@ -59,23 +59,25 @@ OpenCLIP · FAISS · SQLite · watchdog
 
 ## Quick start
 
-See [`docs/development.md`](docs/development.md) for full setup instructions.
+One-time setup (Python 3.13 and Node.js 20+; details in
+[`docs/development.md`](docs/development.md)):
 
 ```bash
-# 1. Backend (Python 3.13, one-time setup)
-cd apps/backend
-py -3.13 -m venv venv
-./venv/Scripts/pip install -r requirements.txt
-
-# 2. From the repo root, run backend + web dev server together
-npm install
-npm run dev
-
-# 3. In a separate terminal, launch the desktop shell
-cd apps/desktop
-npm install
-npm run start
+cd apps/backend && py -3.13 -m venv venv && ./venv/Scripts/pip install -r requirements.txt && cd ../..
+npm install --prefix apps/web
+npm install --prefix apps/desktop
 ```
+
+Then start Cortex with one command, from the project folder:
+
+```bash
+npm run app
+```
+
+This builds the interface and opens the Cortex window, which starts its
+own engine in the background and stops it when you close the window. The
+first launch downloads the AI model (~580 MB) once. For hot-reloading
+development instead, see [`docs/development.md`](docs/development.md).
 
 ## Credits
 

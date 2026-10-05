@@ -33,9 +33,42 @@ npm install
 cd ../..
 ```
 
+## Running Cortex as an app
+
+```bash
+npm run app
+```
+
+This builds the interface to static files (`apps/web/out`) and opens the
+Cortex window (Electron), which:
+
+- serves the interface itself from a private `cortex://app` address (no
+  dev server, no network);
+- starts the engine (`apps/backend/venv`, FastAPI) on a free port, restarts
+  it if it crashes (giving up after 5 crashes in a minute), and stops it
+  when the window closes. Its output goes to `storage/logs/engine.log`;
+- creates a random secret for each launch and attaches it to every request
+  the window makes to the engine. The engine answers nothing without it,
+  so other programs and web pages on the computer can't use it.
+
+Only one Cortex window runs at a time; starting it again focuses the open
+one. If the map looks blank on an unusual graphics setup, start with
+`CORTEX_DISABLE_GPU=1`.
+
+### Why there is no installer yet
+
+An installer (the engine frozen with PyInstaller, Electron packaged with
+electron-builder) produces new, unsigned `.exe` files. On Windows with
+**Smart App Control** turned on, as on the development machine, Windows
+refuses to run unsigned programs that have no reputation. A working
+installer therefore needs code signing, which costs money (a yearly
+certificate, or a monthly cloud signing service). Until that's decided,
+`npm run app` uses only programs
+Windows already trusts here: the official `electron.exe` and `python.exe`.
+
 ## Running Cortex in development
 
-Two terminals:
+For hot reload while changing the code. Two terminals:
 
 **Terminal 1** — backend + web dev server, from the repo root:
 
@@ -53,8 +86,9 @@ cd apps/desktop
 npm run start
 ```
 
-This compiles `electron/*.ts` to `dist/` and launches Electron, which loads
-the running Next.js dev server and talks to the FastAPI backend directly.
+This compiles `electron/*.ts` to `dist/` and launches Electron with
+`--dev`: it loads the running Next.js dev server and talks to the engine
+you started in terminal 1 (no launch secret in this mode).
 
 You can also run each process individually:
 

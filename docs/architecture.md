@@ -306,8 +306,13 @@ photos directly, so this adds no new exposure. Web pages open in the user's
 browser can also send requests to `127.0.0.1`: CORS stops them from reading
 any response or sending JSON POSTs (which need a preflight), but a page
 could still *display* (not read) a thumbnail with an `<img>` tag. The fix is
-a per-launch token that Electron generates and the backend requires; it
-lands with packaging (M10), when Electron starts the backend itself.
+a per-launch token that Electron generates and the backend requires.
+*As built (M10):* in app mode Electron starts the engine with a random
+`CORTEX_TOKEN` and adds an `X-Cortex-Token` header to every request its
+window makes to the engine (via `webRequest`), so the token never reaches
+the page's JavaScript. The engine returns 401 to anything without it,
+including `<img>` requests from other pages. In dev mode (no token) the
+engine stays open on 127.0.0.1 as before.
 
 ---
 

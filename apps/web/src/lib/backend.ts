@@ -166,6 +166,31 @@ export const getImageDetail = (id: number) => request<ImageDetail>(`/images/${id
 
 export const getEntity = (id: number) => request<EntityDetail>(`/entities/${id}`);
 
+export interface GraphNode extends EntitySummary {
+  photos: number;
+  cover: number | null;
+}
+
+export interface GraphEdge {
+  source: number;
+  target: number;
+  kind: "part_of" | "took_place_in" | "appears_with";
+  weight: number;
+}
+
+export interface GraphSlice {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  total: number;
+}
+
+export const getGraph = (options: { limit?: number; focus?: number } = {}) => {
+  const params = new URLSearchParams();
+  if (options.limit) params.set("limit", String(options.limit));
+  if (options.focus !== undefined) params.set("focus", String(options.focus));
+  return request<GraphSlice>(`/graph?${params}`);
+};
+
 export const searchPhotos = (query: string, limit: number, signal?: AbortSignal) =>
   request<SearchResponse>("/search", {
     method: "POST",

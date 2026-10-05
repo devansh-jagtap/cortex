@@ -30,8 +30,9 @@ import { cn } from "@/lib/utils";
 
 // MapLibre touches `window` when it loads, so it is only ever loaded in the browser.
 const MapView = dynamic(() => import("@/components/map-view"), { ssr: false });
+const GalaxyView = dynamic(() => import("@/components/galaxy-view"), { ssr: false });
 
-type View = "search" | "map";
+type View = "search" | "map" | "galaxy";
 
 const PAGE_SIZE = 120;
 const RESULT_LIMIT = 120;
@@ -240,7 +241,7 @@ export default function Home() {
             <span className="font-serif text-[22px] leading-none tracking-[-0.01em]">Cortex</span>
             {hasLibrary && (
               <nav aria-label="Views" className="flex items-center gap-1 text-sm">
-                {(["search", "map"] as const).map((v) => (
+                {(["search", "map", "galaxy"] as const).map((v) => (
                   <button
                     key={v}
                     type="button"
@@ -279,8 +280,14 @@ export default function Home() {
       </header>
 
       {hasLibrary && view === "map" && <MapView onOpen={(list, index) => setViewer({ items: list, index })} />}
+      {hasLibrary && view === "galaxy" && <GalaxyView onShowPhotos={openEntity} />}
 
-      <main className={cn("mx-auto w-full max-w-[1240px] flex-1 flex-col px-6 pb-20", view === "map" && hasLibrary ? "hidden" : "flex")}>
+      <main
+        className={cn(
+          "mx-auto w-full max-w-[1240px] flex-1 flex-col px-6 pb-20",
+          view !== "search" && hasLibrary ? "hidden" : "flex",
+        )}
+      >
         {notice && (
           <p role="alert" className="mt-4 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
             {notice}

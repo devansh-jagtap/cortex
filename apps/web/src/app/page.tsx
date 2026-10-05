@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 
+import { AddFolderDialog } from "@/components/add-folder-dialog";
 import { EntityHeader } from "@/components/entity";
 import { PhotoGrid, type PhotoGridHandle } from "@/components/photo-grid";
 import { PhotoViewer } from "@/components/photo-viewer";
 import { SearchField } from "@/components/search-field";
 import { StatusMenu, progressOf } from "@/components/status-menu";
 import { Button } from "@/components/ui/button";
+import { FolderPlusIcon } from "lucide-react";
 import {
   cancelIndexing,
   checkBackendHealth,
@@ -62,6 +64,7 @@ export default function Home() {
   const [view, setView] = useState<View>("search");
   const [expandedQuery, setExpandedQuery] = useState<string | null>(null);
   const [entity, setEntity] = useState<EntityDetail | null>(null);
+  const [addFolderOpen, setAddFolderOpen] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const gridRef = useRef<PhotoGridHandle>(null);
@@ -173,9 +176,24 @@ export default function Home() {
     }
   }
 
+  /** The desktop app opens Windows' folder picker; a plain browser asks for the path. */
   async function handleAddFolder() {
-    const path = await window.cortex?.selectFolder();
+    if (!window.cortex) {
+      setAddFolderOpen(true);
+      return;
+    }
+    const path = await window.cortex.selectFolder();
     if (path) await beginIndexing(path);
+  }
+
+  async function addFolderByPath(path: string): Promise<string | null> {
+    try {
+      await startIndexing(path);
+      setStatus(await getIndexStatus());
+      return null;
+    } catch (err) {
+      return err instanceof Error ? err.message : "Couldn't add that folder.";
+    }
   }
 
   async function handleIndexComputer() {
@@ -279,17 +297,24 @@ Its photos leave your Cortex library and searches. The folder and the photos in 
               </nav>
             )}
           </div>
+          <div className="flex items-center gap-2">
+          {online && (
+            <Button variant="ghost" size="sm" onClick={handleAddFolder} className="text-muted-foreground hover:text-foreground">
+              <FolderPlusIcon />
+              Add folder
+            </Button>
+          )}
           <StatusMenu
             status={status}
             online={online}
             library={library}
-            hasBridge={hasBridge}
             onAddFolder={handleAddFolder}
             onIndexComputer={handleIndexComputer}
             onScan={beginIndexing}
             onRemove={handleRemoveFolder}
             onCancel={() => void cancelIndexing()}
           />
+          </div>
         </div>
         {progress !== null && (
           <div
@@ -301,7 +326,7 @@ Its photos leave your Cortex library and searches. The folder and the photos in 
       </header>
 
       {hasLibrary && view === "map" && <MapView onOpen={(list, index) => setViewer({ items: list, index })} />}
-      {hasLibrary && view === "galaxy" && <GalaxyView onShowPhotos={openEntity} />}
+      {hasLibrary && view === "galaxy" && <GalaxyView onOpen={(list, index) => setViewer({ items: list, index })} />}
 
       <main
         className={cn(
@@ -318,7 +343,7 @@ Its photos leave your Cortex library and searches. The folder and the photos in 
         {online === false && <Offline />}
 
         {online && library && !hasLibrary && (
-          <Welcome hasBridge={hasBridge} onIndexComputer={handleIndexComputer} onAddFolder={handleAddFolder} />
+          <Welcome onIndexComputer={handleIndexComputer} onAddFolder={handleAddFolder} />
         )}
 
         {hasLibrary && (
@@ -428,6 +453,8 @@ Its photos leave your Cortex library and searches. The folder and the photos in 
         )}
       </main>
 
+      <AddFolderDialog open={addFolderOpen} onOpenChange={setAddFolderOpen} onAdd={addFolderByPath} />
+
       <PhotoViewer
         items={viewer?.items ?? []}
         index={viewer?.index ?? null}
@@ -440,11 +467,9 @@ Its photos leave your Cortex library and searches. The folder and the photos in 
 }
 
 function Welcome({
-  hasBridge,
   onIndexComputer,
   onAddFolder,
 }: {
-  hasBridge: boolean;
   onIndexComputer: () => void;
   onAddFolder: () => void;
 }) {
@@ -459,13 +484,10 @@ function Welcome({
         <Button size="lg" onClick={onIndexComputer}>
           Index this computer
         </Button>
-        <Button size="lg" variant="outline" disabled={!hasBridge} onClick={onAddFolder}>
+        <Button size="lg" variant="outline" onClick={onAddFolder}>
           Choose a folder
         </Button>
       </div>
-      {!hasBridge && (
-        <p className="text-xs text-muted-foreground">Choosing a folder works in the Cortex desktop app.</p>
-      )}
     </section>
   );
 }

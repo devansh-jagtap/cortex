@@ -62,7 +62,6 @@ interface StatusMenuProps {
   status: IndexStatus;
   online: boolean | null;
   library: Library | null;
-  hasBridge: boolean;
   onAddFolder: () => void;
   onIndexComputer: () => void;
   onScan: (path: string) => void;
@@ -74,7 +73,6 @@ export function StatusMenu({
   status,
   online,
   library,
-  hasBridge,
   onAddFolder,
   onIndexComputer,
   onScan,
@@ -176,7 +174,7 @@ export function StatusMenu({
         )}
 
         <div className="flex gap-2 border-t border-border p-3">
-          <Button size="sm" variant="secondary" disabled={!hasBridge} onClick={onAddFolder} title={hasBridge ? undefined : "Available in the Cortex desktop app"}>
+          <Button size="sm" variant="secondary" onClick={onAddFolder}>
             Add folder…
           </Button>
           <Button size="sm" variant="ghost" onClick={onIndexComputer}>

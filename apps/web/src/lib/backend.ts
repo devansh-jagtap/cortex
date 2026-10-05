@@ -173,29 +173,33 @@ export const getImageDetail = (id: number) => request<ImageDetail>(`/images/${id
 
 export const getEntity = (id: number) => request<EntityDetail>(`/entities/${id}`);
 
-export interface GraphNode extends EntitySummary {
-  photos: number;
-  cover: number | null;
+export interface PhotoNode {
+  id: number;
+  filename: string;
+  width: number | null;
+  height: number | null;
+  cluster: number;
 }
 
-export interface GraphEdge {
+export interface PhotoLink {
   source: number;
   target: number;
-  kind: "part_of" | "took_place_in" | "appears_with";
-  weight: number;
+  similarity: number;
 }
 
-export interface GraphSlice {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
+export interface PhotoGraph {
+  nodes: PhotoNode[];
+  edges: PhotoLink[];
+  clusters: { id: number; size: number; label: string | null }[];
   total: number;
 }
 
-export const getGraph = (options: { limit?: number; focus?: number } = {}) => {
+/** Photos joined when they look alike; `focus` = one photo and its closest look-alikes. */
+export const getPhotoGraph = (options: { limit?: number; focus?: number } = {}) => {
   const params = new URLSearchParams();
   if (options.limit) params.set("limit", String(options.limit));
   if (options.focus !== undefined) params.set("focus", String(options.focus));
-  return request<GraphSlice>(`/graph?${params}`);
+  return request<PhotoGraph>(`/graph/photos?${params}`);
 };
 
 export const searchPhotos = (query: string, limit: number, signal?: AbortSignal) =>

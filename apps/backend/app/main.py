@@ -150,23 +150,59 @@ _IMAGE_COLUMNS = """
 
 @app.get("/images")
 def list_images(
-    limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0)
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    ids: str | None = Query(None, description="Comma-separated ids; returns just these photos"),
 ) -> dict:
+    where, params = "f.status = 'indexed'", []
+    if ids is not None:
+        try:
+            wanted = [int(i) for i in ids.split(",") if i.strip()][:500]
+        except ValueError:
+            raise HTTPException(status_code=422, detail="ids must be comma-separated integers")
+        where += f" AND f.id IN ({','.join('?' * len(wanted)) or 'NULL'})"
+        params = wanted
     conn = get_connection()
     try:
-        total = conn.execute("SELECT COUNT(*) FROM files WHERE status = 'indexed'").fetchone()[0]
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM files f WHERE {where}", params
+        ).fetchone()[0]
         rows = conn.execute(
             f"""
             SELECT {_IMAGE_COLUMNS} FROM files f JOIN image_metadata m ON m.file_id = f.id
-            WHERE f.status = 'indexed'
+            WHERE {where}
             ORDER BY COALESCE(m.captured_at, f.mtime_ns / 1e9) DESC, f.id DESC
             LIMIT ? OFFSET ?
             """,
-            (limit, offset),
+            (*params, limit, offset),
         ).fetchall()
     finally:
         conn.close()
     return {"total": total, "items": [dict(r) for r in rows]}
+
+
+@app.get("/map/points")
+def map_points() -> dict:
+    """Every indexed photo with a location, as GeoJSON for the map to cluster."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT f.id, m.latitude, m.longitude FROM files f JOIN image_metadata m ON m.file_id = f.id "
+            "WHERE f.status = 'indexed' AND m.latitude IS NOT NULL AND m.longitude IS NOT NULL"
+        ).fetchall()
+    finally:
+        conn.close()
+    return {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [r["longitude"], r["latitude"]]},
+                "properties": {"id": r["id"]},
+            }
+            for r in rows
+        ],
+    }
 
 
 class SearchRequest(BaseModel):

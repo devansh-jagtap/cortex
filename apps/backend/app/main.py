@@ -7,6 +7,7 @@ same machine.
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import re
@@ -14,9 +15,9 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 import numpy as np
 from pydantic import BaseModel, Field, field_validator
 
@@ -60,9 +61,25 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="Cortex Backend", version="0.2.0", lifespan=lifespan)
 
+# When the desktop app starts the engine it passes a fresh random secret in
+# CORTEX_TOKEN and adds it to every request it makes. Anything else on the
+# machine (including web pages open in a browser) then gets 401. Without the
+# variable (plain development), the engine is open on 127.0.0.1 as before.
+_TOKEN = os.environ.get("CORTEX_TOKEN")
+
+
+@app.middleware("http")
+async def require_token(request: Request, call_next):
+    if _TOKEN and request.method != "OPTIONS":
+        sent = request.headers.get("x-cortex-token", "")
+        if not hmac.compare_digest(sent, _TOKEN):
+            return JSONResponse({"detail": "Not allowed"}, status_code=401)
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "cortex://app"],
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )

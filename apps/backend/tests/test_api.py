@@ -246,3 +246,17 @@ def test_removing_a_folder_takes_its_photos_out_of_library_and_search(tmp_path):
     assert [r["filename"] for r in results] == ["red.jpg"]
     assert (gone / "blue.jpg").exists()
     assert client.delete("/roots/999999").status_code == 404
+
+
+def test_with_a_launch_token_only_requests_carrying_it_are_answered(monkeypatch):
+    monkeypatch.setattr(main, "_TOKEN", "s3cret-launch-token")
+
+    assert client.get("/health").status_code == 401
+    assert client.get("/health", headers={"X-Cortex-Token": "wrong"}).status_code == 401
+    assert client.get("/health", headers={"X-Cortex-Token": "s3cret-launch-token"}).json() == {"status": "ok"}
+    assert client.get("/images/1/thumbnail").status_code == 401
+
+
+def test_without_a_token_the_engine_is_open_for_development():
+    assert main._TOKEN is None
+    assert client.get("/health").status_code == 200

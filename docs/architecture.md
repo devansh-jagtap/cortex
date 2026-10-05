@@ -377,6 +377,21 @@ brute-force cosine over 512-d takes single-digit milliseconds and uses
 training/tuning; that trade only becomes worth it around a million
 vectors. We measure first.
 
+*Measured (M9, `apps/backend/scripts/benchmark.py`, development laptop,
+CPU):*
+
+| photos | load index from SQLite at startup | one FAISS search |
+|---:|---:|---:|
+| 10,000 | 0.26 s | 3.3 ms |
+| 50,000 | 1.38 s | 11.4 ms |
+| 100,000 | 2.58 s | 19.3 ms |
+
+Encoding the query text takes ~64 ms, so a search stays around 100 ms
+end to end at 100k photos: exact search holds. The real cost of a large
+library is the first pass: CLIP embeds ~17 photos/s on this CPU (using
+half the cores), so 100k photos take ~1.6 hours in the background once;
+the CUDA build of PyTorch is the fix for that.
+
 **Why filenames are not the primary search?** Because the whole point is
 "IMG_4821.jpg" being findable as "sunset over the sea". Filename/folder
 text will later become *one more signal* (a text space fused in), never

@@ -28,8 +28,8 @@ This repository is being built incrementally, one verified milestone at a time.
 | M6 · Map view | done |
 | M7 · Knowledge graph foundation (places, scenes, events) | done |
 | M8 · Galaxy view of the graph | done |
-| M9 · Robustness and performance | next |
-| M10 · Packaging (installer) | planned |
+| M9 · Robustness and performance | done |
+| M10 · Packaging (installer) | next |
 
 What works today: add a folder and Cortex catalogs every photo in it in the
 background — dimensions, EXIF date/GPS/camera, and a 320px thumbnail — with

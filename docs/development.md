@@ -98,8 +98,10 @@ npm run dev:web       # Next.js dev server only, from repo root
   connected to it, *Show all photos* to open it in Search. Scroll to zoom,
   drag to pan.
 - **Library panel** (click the status in the top-right corner): the
-  folders Cortex watches, Rescan, Add folder, Index this computer, and
-  Cancel / Resume for a running or stopped scan.
+  folders Cortex watches, Rescan, Remove, Add folder, Index this computer,
+  and Cancel / Resume for a running or stopped scan. *Remove* takes a
+  folder out of Cortex (its records, AI vectors, labels, and thumbnails);
+  the folder and the photos in it are never touched.
 
 ## Verifying the backend independently
 
@@ -159,6 +161,19 @@ Application Control policy has blocked this file`, Windows is refusing an
 unsigned native library that is too new to have a reputation. `faiss-cpu`
 is pinned to 1.12.0 for this reason; don't upgrade it without checking that
 `python -c "import faiss"` still works.
+
+## Measuring performance
+
+```bash
+cd apps/backend
+./venv/Scripts/python.exe scripts/benchmark.py          # search index at 10k/50k/100k photos
+./venv/Scripts/python.exe scripts/benchmark.py --clip   # + real CLIP speed on this machine
+```
+
+It uses a throwaway database in a temp folder, never your real index.
+On the development laptop: one search takes 3 ms at 10k photos and 19 ms
+at 100k (plus ~64 ms to encode the query text); loading the index at
+startup takes 2.6 s at 100k; CLIP embeds ~17 photos/s on the CPU.
 
 ## Automatic updates (the watcher)
 

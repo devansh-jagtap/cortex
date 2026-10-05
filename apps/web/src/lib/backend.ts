@@ -123,6 +123,15 @@ export const getSuggestedRoots = () => request<{ home: string }>("/roots/suggest
 export const getImages = (limit: number, offset: number) =>
   request<ImagePage>(`/images?limit=${limit}&offset=${offset}`);
 
+export const getImagesByIds = (ids: number[]) => request<ImagePage>(`/images?limit=500&ids=${ids.join(",")}`);
+
+export interface MapPoints {
+  type: "FeatureCollection";
+  features: { type: "Feature"; geometry: { type: "Point"; coordinates: [number, number] }; properties: { id: number } }[];
+}
+
+export const getMapPoints = () => request<MapPoints>("/map/points");
+
 export const searchPhotos = (query: string, limit: number, signal?: AbortSignal) =>
   request<SearchResponse>("/search", {
     method: "POST",

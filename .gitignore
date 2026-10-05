@@ -32,3 +32,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Copied from node_modules on every dev/build (apps/web/scripts/copy-maplibre-worker.mjs)
+apps/web/public/maplibre/

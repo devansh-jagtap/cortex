@@ -119,3 +119,23 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* MapLibre's built-in controls, in Cortex's dark surfaces. */
+.dark .maplibregl-ctrl.maplibregl-ctrl-group,
+.dark .maplibregl-ctrl.maplibregl-ctrl-attrib {
+  background: color-mix(in oklab, var(--card) 92%, transparent);
+  color: var(--muted-foreground);
+  box-shadow: 0 0 0 1px var(--border);
+}
+.dark .maplibregl-ctrl.maplibregl-ctrl-attrib a {
+  color: var(--foreground);
+}
+.dark .maplibregl-ctrl-group button + button {
+  border-top-color: var(--border);
+}
+.dark .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+  filter: invert(0.9);
+}
+.dark .maplibregl-ctrl-attrib-button {
+  filter: invert(0.9);
+}

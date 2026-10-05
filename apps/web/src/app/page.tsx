@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 
 import { PhotoGrid, type PhotoGridHandle } from "@/components/photo-grid";
 import { PhotoViewer } from "@/components/photo-viewer";
@@ -23,6 +24,11 @@ import {
 } from "@/lib/backend";
 import { plural } from "@/lib/format";
 import { cn } from "@/lib/utils";
+
+// MapLibre touches `window` when it loads, so it is only ever loaded in the browser.
+const MapView = dynamic(() => import("@/components/map-view"), { ssr: false });
+
+type View = "search" | "map";
 
 const PAGE_SIZE = 120;
 const RESULT_LIMIT = 120;
@@ -47,7 +53,8 @@ export default function Home() {
   const [results, setResults] = useState<SearchResponse | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const [viewer, setViewer] = useState<{ items: ImageItem[]; index: number } | null>(null);
+  const [view, setView] = useState<View>("search");
   const [expandedQuery, setExpandedQuery] = useState<string | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -134,7 +141,7 @@ export default function Home() {
       const response = await searchPhotos(q, RESULT_LIMIT, controller.signal);
       if (seq === searchSeq.current) {
         setResults(response);
-        setViewerIndex(null);
+        setViewer(null);
       }
     } catch (err) {
       if (controller.signal.aborted || seq !== searchSeq.current) return;
@@ -196,7 +203,28 @@ export default function Home() {
     <div className="flex min-h-screen flex-1 flex-col">
       <header className="sticky top-0 z-20 border-b border-border/70 bg-background/85 backdrop-blur-md">
         <div className="mx-auto flex h-12 w-full max-w-[1240px] items-center justify-between gap-6 px-6">
-          <span className="font-serif text-[22px] leading-none tracking-[-0.01em]">Cortex</span>
+          <div className="flex items-center gap-7">
+            <span className="font-serif text-[22px] leading-none tracking-[-0.01em]">Cortex</span>
+            {hasLibrary && (
+              <nav aria-label="Views" className="flex items-center gap-1 text-sm">
+                {(["search", "map"] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setView(v)}
+                    aria-current={view === v ? "page" : undefined}
+                    className={cn(
+                      "relative rounded-md px-2.5 py-1.5 capitalize transition-colors focus-visible:outline-2 focus-visible:outline-star",
+                      view === v ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {v}
+                    {view === v && <span aria-hidden className="absolute inset-x-2.5 -bottom-[9px] h-px bg-star" />}
+                  </button>
+                ))}
+              </nav>
+            )}
+          </div>
           <StatusMenu
             status={status}
             online={online}
@@ -217,7 +245,9 @@ export default function Home() {
         )}
       </header>
 
-      <main className="mx-auto flex w-full max-w-[1240px] flex-1 flex-col px-6 pb-20">
+      {hasLibrary && view === "map" && <MapView onOpen={(list, index) => setViewer({ items: list, index })} />}
+
+      <main className={cn("mx-auto w-full max-w-[1240px] flex-1 flex-col px-6 pb-20", view === "map" && hasLibrary ? "hidden" : "flex")}>
         {notice && (
           <p role="alert" className="mt-4 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
             {notice}
@@ -284,7 +314,7 @@ export default function Home() {
                 revealKey={results ? `search:${results.query}` : "library"}
                 ref={gridRef}
                 items={items}
-                onOpen={setViewerIndex}
+                onOpen={(index) => setViewer({ items, index })}
                 onLeaveUp={() => inputRef.current?.focus()}
               />
             )}
@@ -304,7 +334,12 @@ export default function Home() {
         )}
       </main>
 
-      <PhotoViewer items={items} index={viewerIndex} hasBridge={hasBridge} onIndexChange={setViewerIndex} />
+      <PhotoViewer
+        items={viewer?.items ?? []}
+        index={viewer?.index ?? null}
+        hasBridge={hasBridge}
+        onIndexChange={(index) => setViewer((v) => (index === null || !v ? null : { ...v, index }))}
+      />
     </div>
   );
 }

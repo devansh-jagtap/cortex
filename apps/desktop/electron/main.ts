@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, session, shell, type IpcMainInvokeEvent } from "electron";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
@@ -127,6 +127,13 @@ function registerIpcHandlers(): void {
 }
 
 app.whenReady().then(() => {
+  // OpenStreetMap's tile policy asks apps to identify themselves.
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ["https://tile.openstreetmap.org/*"] },
+    (details, callback) => {
+      callback({ requestHeaders: { ...details.requestHeaders, "User-Agent": `Cortex/${app.getVersion()} (local photo map)` } });
+    },
+  );
   registerIpcHandlers();
   createMainWindow();
 

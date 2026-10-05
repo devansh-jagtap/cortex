@@ -25,7 +25,11 @@ This repository is being built incrementally, one verified milestone at a time.
 | M3 · Filesystem watcher | done |
 | M4 · Semantic search core (OpenCLIP + FAISS) | done |
 | M5 · Search UI | done |
-| M6 · Map view | next |
+| M6 · Map view | done |
+| M7 · Knowledge graph foundation (places, scenes, events) | next |
+| M8 · Galaxy view of the graph | planned |
+| M9 · Robustness and performance | planned |
+| M10 · Packaging (installer) | planned |
 
 What works today: add a folder and Cortex catalogs every photo in it in the
 background — dimensions, EXIF date/GPS/camera, and a 320px thumbnail — with
@@ -39,6 +43,7 @@ Every photo is embedded locally with OpenCLIP, and searching by meaning
 keyboard-driven: type a description, arrow into the results, open a photo
 to see where it lives and when it was taken, and open the original in your
 default viewer.
+The Map tab shows every photo that recorded a location, clustered by place.
 
 See [`docs/roadmap-revised.md`](docs/roadmap-revised.md) for the full plan.
 

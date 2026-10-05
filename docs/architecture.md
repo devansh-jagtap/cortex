@@ -449,6 +449,19 @@ Because the shape is "one DB, many projections", adding the timeline
 means adding one endpoint and one page — no changes to extraction,
 embedding, or storage.
 
+*As built (M5–M6):*
+- **Grid**: justified rows that keep each photo's shape; search shows the
+  results close to the best hit first (CLIP scores are only comparable
+  within one query) with the rest behind "Show more"; the library view
+  pages 120 at a time instead of virtualising.
+- **Map**: `GET /map/points` returns every located photo as GeoJSON and
+  MapLibre clusters it client-side (supercluster, in MapLibre's worker).
+  Simpler than server-side clustering and fast at the sizes we have; the
+  bbox/zoom endpoint is the upgrade path once a library has 50k+ located
+  photos. MapLibre's worker can't be found by the bundler, so
+  `apps/web/scripts/copy-maplibre-worker.mjs` serves it from
+  `public/maplibre/` (run automatically before `dev` and `build`).
+
 ---
 
 ## 10. Repository structure

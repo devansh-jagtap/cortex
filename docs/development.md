@@ -76,6 +76,12 @@ npm run dev:web       # Next.js dev server only, from repo root
   its size, camera, location, and similarity to the search. *Open
   original* and *Show in folder* work in the desktop app (the browser
   preview has no access to your files by design).
+- **Map**: every photo that recorded where it was taken (most phone
+  photos do; screenshots don't), clustered by place. Click a cluster or a
+  dot to see its photos, then open one. **This is the only part of Cortex
+  that uses the internet**: it downloads map tiles from OpenStreetMap for
+  the areas you look at. No photo, path, or location from your library is
+  sent; OpenStreetMap only sees which map squares you view.
 - **Library panel** (click the status in the top-right corner): the
   folders Cortex watches, Rescan, Add folder, Index this computer, and
   Cancel / Resume for a running or stopped scan.

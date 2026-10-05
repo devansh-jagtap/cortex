@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 
 from app.database import get_connection
 from app.graph import GraphBuilder
-from app.indexer import IndexCancelled, IndexStats, apply_changes, index_folder
+from app.indexer import IndexCancelled, IndexStats, apply_changes, index_folder, remove_root
 from app.search import EmbedProgress, SearchService
 
 log = logging.getLogger("cortex.jobs")
@@ -35,8 +35,9 @@ class JobAlreadyRunning(Exception):
 
 @dataclass
 class _Task:
-    kind: str  # "scan" | "changes" | "embed" | "graph"
+    kind: str  # "scan" | "changes" | "embed" | "graph" | "remove"
     root_path: str | None = None
+    root_id: int | None = None
     job_id: int | None = None
     paths: set[str] = field(default_factory=set)
 
@@ -78,6 +79,15 @@ class IndexJobManager:
             self._ensure_worker()
             self._cv.notify_all()
         return job_id
+
+    def remove(self, root_id: int, root_path: str) -> None:
+        """Queue forgetting a folder. Raises if it is being scanned right now."""
+        with self._cv:
+            if any(t.kind == "scan" and t.root_path == root_path for t in self._active_tasks()):
+                raise JobAlreadyRunning()
+            self._queue.append(_Task("remove", root_path=root_path, root_id=root_id))
+            self._ensure_worker()
+            self._cv.notify_all()
 
     def submit_changes(self, paths: set[str]) -> None:
         """Queue changed paths; merges into a batch that hasn't started yet."""
@@ -176,6 +186,14 @@ class IndexJobManager:
                     stats = apply_changes(task.paths)
                     log.info("applied %d changed path(s): %s", len(task.paths), stats.to_dict())
                     self.request_embedding()
+                elif task.kind == "remove":
+                    removed = remove_root(task.root_id)
+                    log.info("removed %s from the library (%d photo records)", task.root_path, removed)
+                    with self._cv:
+                        # Don't keep offering "Resume" for a folder that is gone.
+                        if self._snapshot and self._snapshot["stats"].get("root_path") == task.root_path:
+                            self._snapshot = None
+                    self.request_embedding()  # drops their vectors from the search index
                 elif task.kind == "embed":
                     self._run_embed()
                     self.request_graph()

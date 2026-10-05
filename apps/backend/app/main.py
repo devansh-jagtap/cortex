@@ -63,7 +63,7 @@ app = FastAPI(title="Cortex Backend", version="0.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -115,6 +115,24 @@ def index_status() -> dict:
         "watching": watcher.watched_roots(),
         "model": {"state": model["state"], "device": model["device"], "error": model["error"]},
     }
+
+
+@app.delete("/roots/{root_id}", status_code=202)
+def remove_folder(root_id: int) -> dict:
+    """Take a folder out of Cortex. The folder and its photos are not touched."""
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT path FROM roots WHERE id = ?", (root_id,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    try:
+        jobs.remove(root_id, row["path"])
+    except JobAlreadyRunning:
+        raise HTTPException(status_code=409, detail="This folder is being indexed. Cancel that first.")
+    watcher.unwatch(row["path"])
+    return {"removing": row["path"]}
 
 
 @app.get("/roots/suggested")

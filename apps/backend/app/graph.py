@@ -306,6 +306,9 @@ class GraphBuilder:
         """Things that share photos are related, weighted by how many they share."""
         conn = get_connection()
         try:
+            # Entities whose photos were all removed (e.g. a folder was taken
+            # out of Cortex) go too; their relations cascade.
+            conn.execute("DELETE FROM entities WHERE id NOT IN (SELECT entity_id FROM file_entities)")
             conn.execute("DELETE FROM entity_relations WHERE kind = 'appears_with'")
             conn.execute(
                 """

@@ -23,7 +23,7 @@ from app.database import get_connection
 from app.exclusions import is_excluded, skip_dir
 from app.exif_extractor import extract_image_metadata
 from app.scanner import SUPPORTED_IMAGE_EXTENSIONS
-from app.thumbnail_generator import generate_thumbnail
+from app.thumbnail_generator import generate_thumbnail, thumbnail_path_for
 
 # Windows cloud-file attributes. A file with these set is a OneDrive
 # "online-only" placeholder: reading it would silently trigger a download.
@@ -164,6 +164,32 @@ def apply_changes(paths: Iterable[str]) -> IndexStats:
         conn.close()
     stats.current_file = None
     return stats
+
+
+def remove_root(root_id: int) -> int:
+    """Forget a folder: its records, vectors, labels, and thumbnails.
+
+    Only Cortex's own data is deleted; the folder and its photos are not
+    touched. A thumbnail shared with a photo elsewhere (same content) stays.
+    Returns how many photo records were removed.
+    """
+    conn = get_connection()
+    try:
+        hashes = {
+            r[0] for r in conn.execute("SELECT DISTINCT content_hash FROM files WHERE root_id = ?", (root_id,)) if r[0]
+        }
+        removed = conn.execute("DELETE FROM files WHERE root_id = ?", (root_id,)).rowcount
+        conn.execute("DELETE FROM index_jobs WHERE root_id = ?", (root_id,))
+        conn.execute("DELETE FROM roots WHERE id = ?", (root_id,))
+        conn.commit()
+        still_used = {
+            r[0] for r in conn.execute("SELECT DISTINCT content_hash FROM files WHERE content_hash IS NOT NULL")
+        }
+    finally:
+        conn.close()
+    for content_hash in hashes - still_used:
+        thumbnail_path_for(content_hash).unlink(missing_ok=True)
+    return removed
 
 
 def _index_safely(conn, root_id: int, file_path: str, stats: IndexStats) -> bool:

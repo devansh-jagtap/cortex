@@ -221,3 +221,28 @@ def test_images_can_be_fetched_by_ids(tmp_path):
     assert sorted(item["id"] for item in body["items"]) == sorted([all_ids[0], all_ids[2]])
     assert client.get("/images?ids=1,abc").status_code == 422
     assert client.get("/images?ids=").json()["total"] == 0
+
+
+def test_removing_a_folder_takes_its_photos_out_of_library_and_search(tmp_path):
+    from tests.images import make_image
+
+    keep, gone = tmp_path / "keep", tmp_path / "gone"
+    keep.mkdir()
+    gone.mkdir()
+    make_image(keep / "red.jpg", color=(220, 20, 20))
+    make_image(gone / "blue.jpg", color=(20, 20, 220))
+    _run_index(keep)
+    _run_index(gone)
+    roots = {r["path"]: r["id"] for r in client.get("/library").json()["roots"]}
+
+    response = client.delete(f"/roots/{roots[str(gone)]}")
+    assert response.status_code == 202
+    assert main.jobs.wait_idle(timeout=30)
+
+    library = client.get("/library").json()
+    assert [r["path"] for r in library["roots"]] == [str(keep)]
+    assert library["images_indexed"] == 1
+    results = client.post("/search", json={"query": "blue"}).json()["results"]
+    assert [r["filename"] for r in results] == ["red.jpg"]
+    assert (gone / "blue.jpg").exists()
+    assert client.delete("/roots/999999").status_code == 404

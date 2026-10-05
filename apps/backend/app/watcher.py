@@ -63,6 +63,16 @@ class FolderWatcher:
                 return False
         return True
 
+    def unwatch(self, root_path: str) -> None:
+        key = os.path.normcase(os.path.abspath(root_path))
+        with self._lock:
+            watch = self._watches.pop(key, None)
+        if watch is not None:
+            try:
+                self._observer.unschedule(watch)
+            except (KeyError, OSError):
+                pass  # the folder may already be gone
+
     def watched_roots(self) -> int:
         with self._lock:
             return len(self._watches)

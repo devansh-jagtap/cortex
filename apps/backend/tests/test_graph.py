@@ -286,3 +286,22 @@ def test_graph_focus_returns_a_neighbourhood(tmp_path, services, colour_scenes):
     assert {"India", "Panaji", "Red"} <= set(names)
     assert "Paris" not in names
     assert client.get("/graph?focus=999999").status_code == 404
+
+
+def test_removed_folder_leaves_no_places_behind(tmp_path, services, colour_scenes):
+    goa, paris = tmp_path / "goa", tmp_path / "paris"
+    goa.mkdir()
+    paris.mkdir()
+    make_image(goa / "a.jpg", gps=GOA, color=RED)
+    make_image(paris / "b.jpg", gps=PARIS, color=BLUE)
+    _index_via_api(goa)
+    _index_via_api(paris)
+    paris_root = next(r["id"] for r in client.get("/library").json()["roots"] if r["path"] == str(paris))
+
+    client.delete(f"/roots/{paris_root}")
+    assert main.jobs.wait_idle(timeout=60)
+
+    names = {n["name"] for n in client.get("/graph").json()["nodes"]}
+    assert "Goa" in names
+    assert not names & {"Paris", "France", "Île-de-France", "Blue"}
+    assert _entities("place").keys() == {"Panaji", "Goa", "India"}

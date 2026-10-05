@@ -243,3 +243,35 @@ def test_apply_changes_ignores_paths_outside_known_roots(tmp_path):
 
     assert stats.new_images == 0
     assert _statuses() == {}
+
+
+def test_remove_root_forgets_the_folder_but_never_touches_the_photos(tmp_path):
+    from app.indexer import remove_root
+    from app.thumbnail_generator import thumbnail_path_for
+
+    keep, gone = tmp_path / "keep", tmp_path / "gone"
+    keep.mkdir()
+    gone.mkdir()
+    shared = make_image(keep / "same.jpg", color=(7, 7, 7))
+    make_image(gone / "same.jpg", color=(7, 7, 7))  # identical content: shares a thumbnail
+    only_here = make_image(gone / "unique.jpg", color=(200, 100, 0))
+    index_folder(str(keep))
+    index_folder(str(gone))
+    conn = get_connection()
+    gone_id = conn.execute("SELECT id FROM roots WHERE path = ?", (str(gone),)).fetchone()[0]
+    hashes = dict(conn.execute("SELECT filename || '@' || root_id, content_hash FROM files"))
+    conn.close()
+
+    removed = remove_root(gone_id)
+
+    assert removed == 2
+    assert _statuses() == {"same.jpg": "indexed"}
+    assert only_here.exists() and shared.exists()  # the user's files are untouched
+    unique_hash = hashes[f"unique.jpg@{gone_id}"]
+    shared_hash = hashes[f"same.jpg@{gone_id}"]
+    assert not thumbnail_path_for(unique_hash).exists()
+    assert thumbnail_path_for(shared_hash).exists()
+    conn = get_connection()
+    assert conn.execute("SELECT COUNT(*) FROM image_metadata").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM roots").fetchone()[0] == 1
+    conn.close()

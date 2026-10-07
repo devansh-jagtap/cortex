@@ -31,11 +31,9 @@ import {
 import { plural } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-// MapLibre touches `window` when it loads, so it is only ever loaded in the browser.
-const MapView = dynamic(() => import("@/components/map-view"), { ssr: false });
 const GalaxyView = dynamic(() => import("@/components/galaxy-view"), { ssr: false });
 
-type View = "search" | "map" | "galaxy";
+type View = "search" | "galaxy";
 
 const PAGE_SIZE = 120;
 const RESULT_LIMIT = 120;
@@ -279,7 +277,7 @@ Its photos leave your Cortex library and searches. The folder and the photos in 
             <span className="font-serif text-[22px] leading-none tracking-[-0.01em]">Cortex</span>
             {hasLibrary && (
               <nav aria-label="Views" className="flex items-center gap-1 text-sm">
-                {(["search", "map", "galaxy"] as const).map((v) => (
+                {(["search", "galaxy"] as const).map((v) => (
                   <button
                     key={v}
                     type="button"
@@ -325,7 +323,6 @@ Its photos leave your Cortex library and searches. The folder and the photos in 
         )}
       </header>
 
-      {hasLibrary && view === "map" && <MapView onOpen={(list, index) => setViewer({ items: list, index })} />}
       {hasLibrary && view === "galaxy" && <GalaxyView onOpen={(list, index) => setViewer({ items: list, index })} />}
 
       <main

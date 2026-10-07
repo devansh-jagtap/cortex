@@ -134,18 +134,12 @@ function serveBuiltUi(): void {
   });
 }
 
-/** One header listener per session: name ourselves to OSM, and authenticate to the engine. */
+/** Authenticate the window's requests to the engine (the page never sees the token). */
 function decorateRequests(): void {
-  const urls = ["https://tile.openstreetmap.org/*"];
-  if (engine.token) urls.push(`${engine.url}/*`);
-  session.defaultSession.webRequest.onBeforeSendHeaders({ urls }, (details, callback) => {
-    const headers = { ...details.requestHeaders };
-    if (details.url.startsWith("https://tile.openstreetmap.org/")) {
-      headers["User-Agent"] = `Cortex/${app.getVersion()} (local photo map)`;
-    } else if (engine.token) {
-      headers["X-Cortex-Token"] = engine.token;
-    }
-    callback({ requestHeaders: headers });
+  if (!engine.token) return;
+  const token = engine.token;
+  session.defaultSession.webRequest.onBeforeSendHeaders({ urls: [`${engine.url}/*`] }, (details, callback) => {
+    callback({ requestHeaders: { ...details.requestHeaders, "X-Cortex-Token": token } });
   });
 }
 
@@ -167,7 +161,7 @@ function createMainWindow(): BrowserWindow {
   });
 
   // The window only ever shows Cortex itself. Links to the outside world
-  // (e.g. map attribution) open in the user's browser instead.
+  // open in the user's browser instead.
   win.webContents.setWindowOpenHandler(({ url }) => {
     openExternally(url);
     return { action: "deny" };

@@ -158,17 +158,6 @@ export const getImages = (limit: number, offset: number) =>
 
 export const getImagesByIds = (ids: number[]) => request<ImagePage>(`/images?limit=500&ids=${ids.join(",")}`);
 
-export interface MapPoints {
-  type: "FeatureCollection";
-  features: {
-    type: "Feature";
-    geometry: { type: "Point"; coordinates: [number, number] };
-    properties: { id: number; place: string | null };
-  }[];
-}
-
-export const getMapPoints = () => request<MapPoints>("/map/points");
-
 export const getImageDetail = (id: number) => request<ImageDetail>(`/images/${id}/metadata`);
 
 export const getEntity = (id: number) => request<EntityDetail>(`/entities/${id}`);

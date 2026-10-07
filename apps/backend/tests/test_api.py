@@ -187,26 +187,6 @@ def test_status_includes_model_state():
     assert body["model"]["state"] == "ready"
 
 
-def test_map_points_include_only_located_present_photos(tmp_path):
-    from tests.images import make_image
-
-    make_image(tmp_path / "goa.jpg", gps=(15.5, 73.8))
-    gone = make_image(tmp_path / "delhi.jpg", gps=(28.6, 77.2), color=(1, 2, 3))
-    make_image(tmp_path / "no_gps.jpg", color=(4, 5, 6))
-    _run_index(tmp_path)
-    gone.unlink()
-    from app.indexer import apply_changes
-
-    apply_changes({str(gone)})
-
-    body = client.get("/map/points").json()
-
-    assert body["type"] == "FeatureCollection"
-    assert len(body["features"]) == 1
-    lon, lat = body["features"][0]["geometry"]["coordinates"]
-    assert (round(lat, 1), round(lon, 1)) == (15.5, 73.8)
-
-
 def test_images_can_be_fetched_by_ids(tmp_path):
     from tests.images import make_image
 

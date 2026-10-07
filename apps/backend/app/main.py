@@ -220,40 +220,6 @@ def list_images(
     return {"total": total, "items": [dict(r) for r in rows]}
 
 
-@app.get("/map/points")
-def map_points() -> dict:
-    """Every indexed photo with a location, as GeoJSON for the map to cluster."""
-    conn = get_connection()
-    try:
-        # Each point carries its most specific place name, so a clicked cluster
-        # can say where it is ("Panjim, Goa") without another request.
-        rows = conn.execute(
-            """
-            SELECT f.id, m.latitude, m.longitude,
-                   (SELECT group_concat(name, ', ') FROM (
-                        SELECT e.name FROM file_entities fe JOIN entities e ON e.id = fe.entity_id
-                        WHERE fe.file_id = f.id AND e.type = 'place' AND e.key NOT LIKE 'country:%'
-                        ORDER BY CASE WHEN e.key LIKE 'city:%' THEN 0 ELSE 1 END)) AS place
-            FROM files f JOIN image_metadata m ON m.file_id = f.id
-            WHERE f.status = 'indexed' AND m.latitude IS NOT NULL AND m.longitude IS NOT NULL
-            """
-        ).fetchall()
-    finally:
-        conn.close()
-    return {
-        "type": "FeatureCollection",
-        "features": [
-            {
-                "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [r["longitude"], r["latitude"]]},
-                # "Delhi, Delhi" (city and region share a name) reads as "Delhi".
-                "properties": {"id": r["id"], "place": ", ".join(dict.fromkeys((r["place"] or "").split(", "))) or None},
-            }
-            for r in rows
-        ],
-    }
-
-
 class SearchRequest(BaseModel):
     query: str = Field(max_length=500)
     limit: int = Field(60, ge=1, le=300)
